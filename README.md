@@ -58,7 +58,7 @@ The source of truth for project pin assignments is [`include/config.h`](include/
 | Barometer (BMP3XX) | I2C | `SDA=22`, `SCL=20` | Shares the same mutex-protected sensor bus as the IMU |
 | GPS | UART2 | `TX=8`, `RX=7` | Configured for `115200` baud |
 | LoRa radio | SPI | `SCK=5`, `MOSI=19`, `MISO=21` | External SX127x-style radio expected |
-| LoRa control | GPIO | `CS=27`, `RST=32`, `IRQ=14` | IRQ pin is wired, RX callback mode is not yet used in firmware |
+| LoRa control | GPIO | `CS=26=A0`, `RST=4=A5`, `IRQ=39=A3` | IRQ pin is wired, RX callback mode is not yet used in firmware |
 
 The shared I2C layer in [`src/hal/sensors/sensor_bus.cpp`](src/hal/sensors/sensor_bus.cpp):
 
@@ -73,8 +73,8 @@ The shared I2C layer in [`src/hal/sensors/sensor_bus.cpp`](src/hal/sensors/senso
 | --- | --- | --- | --- |
 | ESC | `13` | `0` | Throttle output |
 | Aileron servo | `12` | `1` | Roll control |
-| Elevator servo | `33` | `2` | Pitch control |
-| Rudder servo | `15` | `3` | Yaw / rudder control |
+| Elevator servo | `27` | `2` | Pitch control |
+| Rudder servo | `14` | `3` | Yaw / rudder control |
 
 ### PWM Operating Mode
 

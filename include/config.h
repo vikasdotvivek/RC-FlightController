@@ -15,9 +15,9 @@ constexpr int SCK_PIN = 5;
 constexpr int MOSI_PIN = 19;
 constexpr int MISO_PIN = 21;
 // LoRa control pins
-constexpr int CS_PIN = 27;
-constexpr int RST_PIN = 32;
-constexpr int IRQ_PIN = 14;
+constexpr int CS_PIN = 26;   // A0
+constexpr int RST_PIN = 4;   // A5
+constexpr int IRQ_PIN = 39;  // A3
 // LoRa parameters
 constexpr long LORA_FREQ = 915000000L;
 constexpr uint8_t SYNC_WORD = 0xF3;
@@ -36,7 +36,7 @@ constexpr int SD_LOG_TASK_CORE = 1;
 constexpr uint8_t SD_SCK = 5;
 constexpr uint8_t SD_MOSI = 19;
 constexpr uint8_t SD_MISO = 21;
-constexpr uint8_t SD_CS = 4;   // Connected to A5
+constexpr uint8_t SD_CS = 25;   // Connected to A0
 // SD Card Logger-------------
 
 // GPS-------------
