@@ -14,6 +14,7 @@
 #include "flight/telemetry.h"
 #include "logging/sd_logger.h"
 #include "nav/waypoint.h"
+#include "flight/home.h"
 
 IMUData_raw currentIMU; // Global variable to hold our sensor state
 IMUData_filtered imu_data = {};
@@ -26,6 +27,7 @@ PIDController roll_pid(roll_kp, roll_ki, roll_kd, max_roll_output, max_roll_inte
 PIDController pitch_pid(pitch_kp, pitch_ki, pitch_kd, max_pitch_output, max_pitch_integral);
 PIDController yaw_pid(yaw_kp, yaw_ki, yaw_kd, max_yaw_output, max_yaw_integral);
 PIDController altitude_pid(alt_kp, alt_ki, alt_kd, max_alt_output, max_alt_integral);
+PIDController headingerror_pid(headingerror_kp, headingerror_ki, headingerror_kd, max_headingerror_output, max_headingerror_integral);
 
 namespace {
 
@@ -199,6 +201,14 @@ void TaskGPSRead(void *pvParameters) {
     for (;;) {
         if (GPS_Read(gps_data)) {
             if (gps_data.lock_acquired) {
+
+                if(!home_is_set()) {
+                    float home_msl = baro_data.healthy ? baro_data.altitude : gps_data.altitude;
+                    set_home_location(gps_data.latitude, gps_data.longitude, home_msl);
+                    Serial.println("Home location set.");
+
+                }
+
                 navigation.update(gps_data.latitude, gps_data.longitude, gps_data.altitude);
             }
         }
@@ -229,6 +239,11 @@ void TaskFlightControl(void *pvParameters) {
 }
 
 void TaskTelemetryTx(void *pvParameters) {
+    if (!LORA_LOGGING_ENABLED) {
+        vTaskDelete(NULL);
+        return;
+    }
+
     TickType_t xLastWakeTime;
     const TickType_t xFrequency = pdMS_TO_TICKS(TELEMETRY_TASK_PERIOD_MS);
     xLastWakeTime = xTaskGetTickCount();
@@ -267,6 +282,12 @@ void TaskSDLog(void *pvParameters) {
 void setup() {
     Serial.begin(115200);
     while (!Serial); 
+
+    // Shared SPI bus safety: deselect peripherals before driver init.
+    pinMode(CS_PIN, OUTPUT);
+    digitalWrite(CS_PIN, HIGH);
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
     
     if (!SensorBus_Init()) {
         Serial.println("Sensor I2C bus init failed.");
@@ -281,8 +302,13 @@ void setup() {
     GPS_Init();
     navigation.restart_mission();
 
-    if (!lora_init()) {
-        Serial.println("LoRa init failed.");
+    if (LORA_LOGGING_ENABLED) {        
+        if (!lora_init()) {
+            Serial.println("LoRa init failed.");
+        }
+    }
+    else {
+        Serial.println("LoRa Logging Disabled by config.");
     }
 
     if (SD_LOGGING_ENABLED) {
@@ -295,6 +321,9 @@ void setup() {
             // so the logging task will safely do nothing.
             Serial.println("SD Card Init Failed. Logging will be disabled.");
         }
+    }
+    else {
+        Serial.println("SD Logging Disabled by config.");
     }
 
     xTaskCreatePinnedToCore(

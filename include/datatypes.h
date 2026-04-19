@@ -99,5 +99,12 @@ struct telemetrydata{
 struct waypoint{
     double lat;
     double lon;
-    float alt;          ///////////////m
+    float alt_AGL;          ///////////////agl in m
+};
+
+struct HomeState{
+    double lat;
+    double lon;
+    float alt_MSL;          //msl in m
+    bool is_set;
 };

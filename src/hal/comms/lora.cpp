@@ -2,7 +2,9 @@
 #include <SPI.h>
 #include <LoRa.h>
 #include <string.h>
+#include <freertos/semphr.h>
 #include "hal/comms/lora.h"
+#include "hal/comms/spi_bus.h"
 #include "../include/config.h"
 
 namespace {
@@ -21,6 +23,15 @@ void give_lora_lock() {
   }
 }
 
+bool take_spi_lock() {
+  return SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS));
+}
+
+void deselect_sd() {
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+}
+
 }  // namespace
 
 bool lora_init() {
@@ -35,16 +46,38 @@ bool lora_init() {
     }
   }
 
+  if (!SPIBus_Init()) {
+    return false;
+  }
+
+  if (!take_lora_lock()) {
+    return false;
+  }
+
+  if (!take_spi_lock()) {
+    give_lora_lock();
+    return false;
+  }
+
+  deselect_sd();
+  pinMode(CS_PIN, OUTPUT);
+  digitalWrite(CS_PIN, HIGH);
+
   SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, -1);
   LoRa.setSPI(SPI);
+  LoRa.setSPIFrequency(SPI_BUS_FREQUENCY_HZ);
   LoRa.setPins(CS_PIN, RST_PIN, IRQ_PIN);
 
   if (!LoRa.begin(LORA_FREQ)) {
+    SPIBus_Unlock();
+    give_lora_lock();
     return false;
   }
 
   LoRa.setSpreadingFactor(7);
   LoRa.setSyncWord(SYNC_WORD);
+  SPIBus_Unlock();
+  give_lora_lock();
   g_lora_ready = true;
   return true;
 }
@@ -54,11 +87,19 @@ bool lora_send(const uint8_t *data, size_t length) {
     return false;
   }
 
+  if (!take_spi_lock()) {
+    give_lora_lock();
+    return false;
+  }
+
+  deselect_sd();
+
   const int begin_result = LoRa.beginPacket();
   const size_t bytes_written =
       (begin_result == 1) ? LoRa.write(data, length) : 0;
   const int end_result = (begin_result == 1) ? LoRa.endPacket() : 0;
 
+  SPIBus_Unlock();
   give_lora_lock();
   return begin_result == 1 && bytes_written == length && end_result == 1;
 }
@@ -76,8 +117,16 @@ size_t lora_receive(uint8_t *buffer, size_t max_length) {
     return 0;
   }
 
+  if (!take_spi_lock()) {
+    give_lora_lock();
+    return 0;
+  }
+
+  deselect_sd();
+
   const int packet_size = LoRa.parsePacket();
   if (packet_size <= 0) {
+    SPIBus_Unlock();
     give_lora_lock();
     return 0;
   }
@@ -91,6 +140,7 @@ size_t lora_receive(uint8_t *buffer, size_t max_length) {
     (void)LoRa.read();
   }
 
+  SPIBus_Unlock();
   give_lora_lock();
   return bytes_read;
 }

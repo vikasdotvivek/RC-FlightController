@@ -8,7 +8,7 @@ constexpr int SCK_PIN = 18;
 constexpr int MISO_PIN = 19;
 constexpr int MOSI_PIN = 23;
 constexpr int CS_PIN = 5;
-constexpr int RST_PIN = 14;
+constexpr int RST_PIN = 4;
 constexpr int IRQ_PIN = 2;
 
 constexpr long LORA_FREQ = 915E6;

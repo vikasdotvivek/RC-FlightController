@@ -18,11 +18,23 @@ void motormixer_compute(float throttle_pid, float roll_pid, float pitch_pid, flo
     int elevator_out = 1500 + pitch_pid;
     int rudder_out = 1500 + yaw_pid;
 
+    // Serial.printf("throttle_out=%d aileron_out=%d elevator_out=%d rudder_out=%d\n",
+    //               throttle_out,
+    //               aileron_out,
+    //               elevator_out,
+    //               rudder_out);
+
     //clamp pwm outputs
     throttle_out = std::max(1000, std::min(2000, throttle_out));
     aileron_out = std::max(1000, std::min(2000, aileron_out));
     elevator_out = std::max(1000, std::min(2000, elevator_out));
     rudder_out = std::max(1000, std::min(2000, rudder_out));
+
+    // Serial.printf("throttle_out=%d aileron_out=%d elevator_out=%d rudder_out=%d\n",
+    //               throttle_out,
+    //               aileron_out,
+    //               elevator_out,
+    //               rudder_out);
 
     // write pwm to motors
     pwm_write(esc_channel, throttle_out);

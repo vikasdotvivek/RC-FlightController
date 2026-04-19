@@ -1,4 +1,5 @@
 #include "nav/waypoint.h"
+#include "math/utils.h"
 #include <cmath>
 #include "config.h"
 
@@ -7,6 +8,7 @@ Navigation navigation;
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+constexpr double NAV_EARTH_RADIUS_METERS = 6371000.0;
 
 double degrees_to_radians(double degrees) {
     return degrees * kPi / 180.0;
@@ -20,11 +22,9 @@ float normalize_heading_degrees(float heading_degrees) {
     while (heading_degrees < 0.0f) {
         heading_degrees += 360.0f;
     }
-
     while (heading_degrees >= 360.0f) {
         heading_degrees -= 360.0f;
     }
-
     return heading_degrees;
 }
 
@@ -95,7 +95,6 @@ void Navigation::update(double current_lat, double current_lon, float current_al
 
     if (current_waypoint_index >= num_waypoints){
         mission_complete = true;
-        target_heading = 0.0f;
         target_distance = 0.0f;
         leg_reference_distance = 0.0f;
         leg_progress_percent = 100.0f;
@@ -141,7 +140,6 @@ void Navigation::update(double current_lat, double current_lon, float current_al
 
     if (current_waypoint_index >= num_waypoints) {
         mission_complete = true;
-        target_heading = 0.0f;
         target_distance = 0.0f;
         leg_reference_distance = 0.0f;
         leg_progress_percent = 100.0f;
@@ -157,11 +155,11 @@ float Navigation::get_target_distance() {
 }
 
 float Navigation::get_target_altitude() {
-    if (current_waypoint_index >= num_waypoints) {
-        return 0.0f;
+    if (current_waypoint_index >= num_waypoints && num_waypoints > 0) {
+        return missionwaypoints[num_waypoints -1].alt_AGL;
     }
 
-    return missionwaypoints[current_waypoint_index].alt;
+    return missionwaypoints[current_waypoint_index].alt_AGL;
 }
 
 float Navigation::get_leg_progress_percent() {
@@ -180,7 +178,7 @@ float Navigation::get_mission_progress_percent() {
 
     const float mission_progress =
         100.0f * (completed_waypoints / static_cast<float>(num_waypoints));
-    return std::fmax(0.0f, std::fmin(100.0f, mission_progress));
+    return math::clamp_value(mission_progress, 0.0f, 100.0f);
 }
 
 int Navigation::get_current_waypoint_index() {

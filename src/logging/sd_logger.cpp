@@ -1,23 +1,46 @@
 #include "logging/sd_logger.h"
 #include "config.h"
+#include "hal/comms/spi_bus.h"
 
 #include <SPI.h>
 #include <SD.h>
 
-// Create a dedicated SPI object for the SD card
-SPIClass featherSPI(HSPI);
+#include <freertos/FreeRTOS.h>
+
+namespace {
+
+void DeselectLoRaOnSharedSPI() {
+    pinMode(CS_PIN, OUTPUT);
+    digitalWrite(CS_PIN, HIGH);
+}
+
+} // namespace
 
 File logFile; // Global file object for the current log
 
 bool SD_Logger_Init() {
     Serial.println("\n--- Adafruit Feather V2 SD Init ---");
 
-    // Force the SPI bus to use the physical pins printed on the Feather
-    featherSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    if (!SPIBus_Init()) {
+        Serial.println("SPI bus mutex init failed.");
+        return false;
+    }
 
-    // Initialize the SD card using the custom SPI bus.
-    // Drop the frequency to 4MHz (4000000) to maximize stability.
-    if (!SD.begin(SD_CS, featherSPI, 4000000)) {
+    if (!SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
+        Serial.println("Timed out waiting for SPI bus lock.");
+        return false;
+    }
+
+    DeselectLoRaOnSharedSPI();
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+
+    // Bring up the shared SPI bus on the board pin map.
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, -1);
+
+    // SD and LoRa share one bus, so keep one shared max frequency.
+    if (!SD.begin(SD_CS, SPI, SPI_BUS_FREQUENCY_HZ)) {
+        SPIBus_Unlock();
         Serial.println("Card Mount Failed.");
         Serial.println("Troubleshooting: Check wiring, SD format (FAT32), or power supply.");
         return false;
@@ -25,6 +48,7 @@ bool SD_Logger_Init() {
     
     uint8_t cardType = SD.cardType();
     if (cardType == CARD_NONE) {
+        SPIBus_Unlock();
         Serial.println("No SD card attached (Hardware detected, but no card found).");
         return false;
     }
@@ -39,11 +63,21 @@ bool SD_Logger_Init() {
 
     uint64_t cardSize = SD.cardSize() / (1024 * 1024);
     Serial.printf("Card Size: %lluMB\n", cardSize);
+    Serial.printf("Shared SPI Frequency: %luHz\n", static_cast<unsigned long>(SPI_BUS_FREQUENCY_HZ));
+
+    SPIBus_Unlock();
 
     return true;
 }
 
 bool SD_Logger_CreateNewLog() {
+    if (!SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
+        Serial.println("Timed out waiting for SPI bus lock while creating log file.");
+        return false;
+    }
+
+    DeselectLoRaOnSharedSPI();
+
     // Find an unused log file name
     char filename[] = "/log_000.csv";
     for (int i = 0; i < 1000; i++) {
@@ -54,29 +88,37 @@ bool SD_Logger_CreateNewLog() {
             logFile = SD.open(filename, FILE_WRITE);
             if (logFile) {
                 Serial.printf("Created new log file: %s\n", filename);
+                SPIBus_Unlock();
                 return true;
             } else {
                 Serial.printf("Failed to create log file: %s\n", filename);
+                SPIBus_Unlock();
                 return false;
             }
         }
     }
+    SPIBus_Unlock();
     Serial.println("Could not create a new log file (all 000-999 exist).");
     return false;
 }
 
 void SD_Logger_WriteHeader() {
-    if (!logFile) {
+    if (!logFile || !SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
         return;
     }
+
+    DeselectLoRaOnSharedSPI();
     logFile.println("roll,pitch,yaw,altitude,des_altitude,gps_lat,gps_long,gps_alt,gps_speed,gps_heading,gps_sats,gps_fix_quality,gps_lock_acquired,baro_altitude,flightmode,waypoint_distance,waypoint_heading,waypoint_target_alt,waypoint_leg_progress,waypoint_mission_progress,waypoint_index,waypoint_total,waypoint_mission_complete,waypoint_target_lat,waypoint_target_lon");
     logFile.flush(); // Ensure header is written immediately
+    SPIBus_Unlock();
 }
 
 void SD_Logger_LogData(const telemetrydata& data) {
-    if (!logFile) {
+    if (!logFile || !SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
         return;
     }
+
+    DeselectLoRaOnSharedSPI();
 
     logFile.print(data.roll, 2); logFile.print(",");
     logFile.print(data.pitch, 2); logFile.print(",");
@@ -104,17 +146,22 @@ void SD_Logger_LogData(const telemetrydata& data) {
     logFile.print(data.waypoint_target_lat, 6); logFile.print(",");
     logFile.print(data.waypoint_target_lon, 6);
     logFile.println();
+    SPIBus_Unlock();
 }
 
 void SD_Logger_Flush() {
-    if (logFile) {
+    if (logFile && SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
+        DeselectLoRaOnSharedSPI();
         logFile.flush();
+        SPIBus_Unlock();
     }
 }
 
 void SD_Logger_CloseLog() {
-    if (logFile) {
+    if (logFile && SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
+        DeselectLoRaOnSharedSPI();
         logFile.close();
+        SPIBus_Unlock();
         Serial.println("Log file closed.");
     }
 }

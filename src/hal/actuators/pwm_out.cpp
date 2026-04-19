@@ -28,9 +28,22 @@ void pwm_write(uint8_t channel, uint16_t microseconds) {
 }
 
 void pwm_reset() {
-    //  neutral positions
-    pwm_write(esc_channel, 1000); //    default PWM uS value should be a variable in config.h
-    pwm_write(aileron_channel, 1500); 
-    pwm_write(elevator_channel, 1500); 
-    pwm_write(rudder_channel, 1500); 
+    // Keep throttle at idle while resetting surfaces.
+    pwm_write(esc_channel, PWM_ESC_MIN_US);
+
+    // Sweep control surfaces from minimum to maximum PWM on reset.
+    for (int pwm_us = 1000; // Start from minimum
+         pwm_us <= 2000;   // End at maximum 
+         pwm_us += PWM_RESET_SWEEP_STEP_US) {
+        const uint16_t pulse = static_cast<uint16_t>(pwm_us);
+        pwm_write(aileron_channel, pulse);
+        pwm_write(elevator_channel, pulse);
+        pwm_write(rudder_channel, pulse);
+        delay(PWM_RESET_SWEEP_DELAY_MS);
+    }
+
+    // Return to neutral after sweep.
+    pwm_write_surface_angle(aileron_channel, SURFACE_NEUTRAL_ANGLE_DEG);
+    pwm_write_surface_angle(elevator_channel, SURFACE_NEUTRAL_ANGLE_DEG);
+    pwm_write_surface_angle(rudder_channel, SURFACE_NEUTRAL_ANGLE_DEG);
 }
