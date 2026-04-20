@@ -135,7 +135,42 @@ const int aileron_channel = 1;
 const int elevator_channel = 2;
 const int rudder_channel = 3;
 
+//pwm settings
+const int pwm_freq = 50; // 50 Hz for standard servos
+const int pwm_resolution = 16; // 16-bit resolution for finer control
+
+
 //PWM limits needed for hardware interfacing and safety
+
+//esc/throttle
+constexpr float throttle_slope = 10.0f;   // 10 us per percent throttle
+constexpr int throttle_int = 1000; ///1000 microseconds corresponds to 0% throttle
+constexpr int throttle_safe = 500; //to cutoff esc
+
+//aileron
+constexpr float aileron_slope = 10.0f;   // microsseconds per degree of deflection
+constexpr int aileron_int = 1500; // 1500 microseconds corresponds to neutral posi (0 degrees) deflection
+
+//elevator
+constexpr float elevator_slope = 10.0f;   
+constexpr int elevator_int = 1500; 
+
+// rudder
+constexpr float rudder_slope = 10.0f;
+constexpr int rudder_int = 1500;
+
+//PWM limits--------------------
+
+
+//Control Surface Hardware Limits
+constexpr float aileron_max_deflection_deg = 30.0f; /// maximum deflection in degrees for aileron
+constexpr float aileron_min_deflection_deg = -30.0f;   // minimum deflection in degrees for aileron
+constexpr float elevator_max_deflection_deg = 30.0f;
+constexpr float elevator_min_deflection_deg = -30.0f; 
+constexpr float rudder_max_deflection_deg = 30.0f;   
+constexpr float rudder_min_deflection_deg = -30.0f; 
+//control surface hardware limits--------------------
+
 
 //Limits
 

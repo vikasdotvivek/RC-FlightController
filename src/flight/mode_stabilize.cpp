@@ -27,10 +27,8 @@ void mode_stabilize_run() {
     float des_pitch = get_des_pitch();
     float des_throttle = get_des_throttle();
 
-
-  const float target_roll = 0.0f;
-  float roll = roll_pid.compute(target_roll, actual_roll, flight_control_dt_seconds);
-    float pitch = pitch_pid.compute(0.0f, actual_pitch, flight_control_dt_seconds);
+    float roll = roll_pid.compute(des_roll, actual_roll, flight_control_dt_seconds);
+    float pitch = pitch_pid.compute(des_pitch, actual_pitch, flight_control_dt_seconds);
     float throttle = des_throttle;
 
 //   if (ROLL_PID_DEBUG_OUTPUT_ENABLED) {

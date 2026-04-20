@@ -36,13 +36,6 @@ void mode_waypoint_run(){
         const float level_pitch_output =
             pitch_pid.compute(2.0f, imu_data.pitch, WAYPOINT_CONTROL_DT_SECONDS);
 
-        if (ROLL_PID_DEBUG_OUTPUT_ENABLED) {
-            Serial.printf("target_roll=%.2f actual_roll=%.2f roll_pid_output=%.2f\n",
-                          target_roll,
-                          imu_data.roll,
-                          level_roll_output);
-        }
-
         motormixer_compute(throttle_output, level_roll_output, level_pitch_output, 0.0f);
         return;
     }

@@ -4,42 +4,24 @@
 
 
 void motormixer_init(){
-    pwm_write(esc_channel, 1000); 
-    pwm_write(aileron_channel, 1500);
-    pwm_write(elevator_channel, 1500);  
-    pwm_write(rudder_channel, 1500);
+    pwm_reset();
 }
 
+//pid controllers output the pwm offesets
+// This function takes the outputs from the PID controllers for throttle, roll, pitch, and yaw..offests from neutral and writes the resultimg PWM signals to the ESC and servos.
 void motormixer_compute(float throttle_pid, float roll_pid, float pitch_pid, float yaw_pid){
     
     //calc motor pwm outputs
-    int throttle_out = 1000 + throttle_pid;
-    int aileron_out = 1500 + roll_pid;
-    int elevator_out = 1500 + pitch_pid;
-    int rudder_out = 1500 + yaw_pid;
+    int throttle_out = throttle_int + (int)throttle_pid;
 
-    // Serial.printf("throttle_out=%d aileron_out=%d elevator_out=%d rudder_out=%d\n",
-    //               throttle_out,
-    //               aileron_out,
-    //               elevator_out,
-    //               rudder_out);
+    int aileron_out  = aileron_int + (int)roll_pid;
+    int elevator_out = elevator_int + (int)pitch_pid;
+    int rudder_out   = rudder_int + (int)yaw_pid;
 
-    //clamp pwm outputs
-    throttle_out = std::max(1000, std::min(2000, throttle_out));
-    aileron_out = std::max(1000, std::min(2000, aileron_out));
-    elevator_out = std::max(1000, std::min(2000, elevator_out));
-    rudder_out = std::max(1000, std::min(2000, rudder_out));
-
-    // Serial.printf("throttle_out=%d aileron_out=%d elevator_out=%d rudder_out=%d\n",
-    //               throttle_out,
-    //               aileron_out,
-    //               elevator_out,
-    //               rudder_out);
-
-    // write pwm to motors
-    pwm_write(esc_channel, throttle_out);
-    pwm_write(aileron_channel, aileron_out);
-    pwm_write(elevator_channel, elevator_out);
-    pwm_write(rudder_channel, rudder_out);
+    //write to esc and servos
+    setThrottle(throttle_out);
+    setAileron(aileron_out);
+    setElevator(elevator_out);
+    setRudder(rudder_out);
     
 }
