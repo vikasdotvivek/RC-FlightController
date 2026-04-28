@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 struct IMUData_raw {
     float accel_x, accel_y, accel_z;
@@ -6,6 +7,7 @@ struct IMUData_raw {
     float mag_x, mag_y, mag_z;
     float roll;
     float pitch;
+    float yaw;
     bool healthy; // True if sensor is connected and reading
 };
 
@@ -49,13 +51,19 @@ struct BarometerData {
     bool healthy; 
 };
 
+struct AirspeedData {
+    double pressure_pa;
+    float airspeed_mps;
+    bool healthy;
+};
+
 
 struct RCData {
-    float aileron_pwm;
-    float elevator_pwm;
-    float throttle_pwm;
-    float rudder_pwm;
-    float flightmode_pwm;
+    unsigned int aileron_pwm;
+    unsigned int elevator_pwm;
+    unsigned int throttle_pwm;
+    unsigned int rudder_pwm;
+    unsigned int flightmode_pwm;
     bool healthy; 
 };
 
@@ -93,6 +101,38 @@ struct telemetrydata{
     int waypoint_index;
     int waypoint_total;
     int waypoint_mission_complete;
+    // sensor health + arming
+    uint8_t imu_healthy;
+    uint8_t baro_healthy;
+    uint8_t gps_healthy;
+    uint8_t rx_healthy;
+    uint8_t armed;
+    // PID outputs (microseconds of servo offset from neutral)
+    float roll_pid_out;
+    float pitch_pid_out;
+    float yaw_pid_out;
+    // Active PID tuning gains
+    float roll_pid_kp;
+    float roll_pid_ki;
+    float roll_pid_kd;
+    float pitch_pid_kp;
+    float pitch_pid_ki;
+    float pitch_pid_kd;
+    float yaw_pid_kp;
+    float yaw_pid_ki;
+    float yaw_pid_kd;
+    float altitude_pid_kp;
+    float altitude_pid_ki;
+    float altitude_pid_kd;
+    float headingerror_pid_kp;
+    float headingerror_pid_ki;
+    float headingerror_pid_kd;
+    // raw RX PWM inputs
+    float rx_throttle_pwm;
+    float rx_aileron_pwm;
+    float rx_elevator_pwm;
+    float rx_rudder_pwm;
+    float rx_mode_pwm;
 };
 
 

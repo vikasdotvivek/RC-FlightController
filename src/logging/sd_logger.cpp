@@ -14,6 +14,8 @@ void DeselectLoRaOnSharedSPI() {
     digitalWrite(CS_PIN, HIGH);
 }
 
+bool g_sd_card_ready = false;
+
 } // namespace
 
 File logFile; // Global file object for the current log
@@ -23,11 +25,13 @@ bool SD_Logger_Init() {
 
     if (!SPIBus_Init()) {
         Serial.println("SPI bus mutex init failed.");
+        g_sd_card_ready = false;
         return false;
     }
 
     if (!SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
         Serial.println("Timed out waiting for SPI bus lock.");
+        g_sd_card_ready = false;
         return false;
     }
 
@@ -43,6 +47,7 @@ bool SD_Logger_Init() {
         SPIBus_Unlock();
         Serial.println("Card Mount Failed.");
         Serial.println("Troubleshooting: Check wiring, SD format (FAT32), or power supply.");
+        g_sd_card_ready = false;
         return false;
     }
     
@@ -50,6 +55,7 @@ bool SD_Logger_Init() {
     if (cardType == CARD_NONE) {
         SPIBus_Unlock();
         Serial.println("No SD card attached (Hardware detected, but no card found).");
+        g_sd_card_ready = false;
         return false;
     }
 
@@ -66,6 +72,7 @@ bool SD_Logger_Init() {
     Serial.printf("Shared SPI Frequency: %luHz\n", static_cast<unsigned long>(SPI_BUS_FREQUENCY_HZ));
 
     SPIBus_Unlock();
+    g_sd_card_ready = true;
 
     return true;
 }
@@ -108,7 +115,22 @@ void SD_Logger_WriteHeader() {
     }
 
     DeselectLoRaOnSharedSPI();
-    logFile.println("roll,pitch,yaw,altitude,des_altitude,gps_lat,gps_long,gps_alt,gps_speed,gps_heading,gps_sats,gps_fix_quality,gps_lock_acquired,baro_altitude,flightmode,waypoint_distance,waypoint_heading,waypoint_target_alt,waypoint_leg_progress,waypoint_mission_progress,waypoint_index,waypoint_total,waypoint_mission_complete,waypoint_target_lat,waypoint_target_lon");
+    logFile.println(
+        "roll,pitch,yaw,des_roll,des_pitch,des_yaw,des_throttle,altitude,des_altitude,"
+        "gps_lat,gps_long,gps_alt,gps_speed,gps_heading,"
+        "gps_sats,gps_fix_quality,gps_lock_acquired,baro_altitude,flightmode,"
+        "waypoint_distance,waypoint_heading,waypoint_target_alt,waypoint_leg_progress,"
+        "waypoint_mission_progress,waypoint_index,waypoint_total,waypoint_mission_complete,"
+        "waypoint_target_lat,waypoint_target_lon,airspeed,"
+        "imu_healthy,baro_healthy,gps_healthy,rx_healthy,armed,"
+        "roll_pid_out,pitch_pid_out,yaw_pid_out,"
+        "roll_pid_kp,roll_pid_ki,roll_pid_kd,"
+        "pitch_pid_kp,pitch_pid_ki,pitch_pid_kd,"
+        "yaw_pid_kp,yaw_pid_ki,yaw_pid_kd,"
+        "altitude_pid_kp,altitude_pid_ki,altitude_pid_kd,"
+        "headingerror_pid_kp,headingerror_pid_ki,headingerror_pid_kd,"
+        "rx_throttle_pwm,rx_aileron_pwm,rx_elevator_pwm,rx_rudder_pwm,rx_mode_pwm"
+    );
     logFile.flush(); // Ensure header is written immediately
     SPIBus_Unlock();
 }
@@ -123,6 +145,10 @@ void SD_Logger_LogData(const telemetrydata& data) {
     logFile.print(data.roll, 2); logFile.print(",");
     logFile.print(data.pitch, 2); logFile.print(",");
     logFile.print(data.yaw, 2); logFile.print(",");
+    logFile.print(data.des_roll, 2); logFile.print(",");
+    logFile.print(data.des_pitch, 2); logFile.print(",");
+    logFile.print(data.des_yaw, 2); logFile.print(",");
+    logFile.print(data.des_throttle, 2); logFile.print(",");
     logFile.print(data.altitude, 2); logFile.print(",");
     logFile.print(data.des_altitude, 2); logFile.print(",");
     logFile.print(data.gps_lat, 6); logFile.print(",");
@@ -144,7 +170,36 @@ void SD_Logger_LogData(const telemetrydata& data) {
     logFile.print(data.waypoint_total); logFile.print(",");
     logFile.print(data.waypoint_mission_complete); logFile.print(",");
     logFile.print(data.waypoint_target_lat, 6); logFile.print(",");
-    logFile.print(data.waypoint_target_lon, 6);
+    logFile.print(data.waypoint_target_lon, 6); logFile.print(",");
+    logFile.print(data.airspeed, 2); logFile.print(",");
+    logFile.print(data.imu_healthy); logFile.print(",");
+    logFile.print(data.baro_healthy); logFile.print(",");
+    logFile.print(data.gps_healthy); logFile.print(",");
+    logFile.print(data.rx_healthy); logFile.print(",");
+    logFile.print(data.armed); logFile.print(",");
+    logFile.print(data.roll_pid_out, 2); logFile.print(",");
+    logFile.print(data.pitch_pid_out, 2); logFile.print(",");
+    logFile.print(data.yaw_pid_out, 2); logFile.print(",");
+    logFile.print(data.roll_pid_kp, 3); logFile.print(",");
+    logFile.print(data.roll_pid_ki, 3); logFile.print(",");
+    logFile.print(data.roll_pid_kd, 3); logFile.print(",");
+    logFile.print(data.pitch_pid_kp, 3); logFile.print(",");
+    logFile.print(data.pitch_pid_ki, 3); logFile.print(",");
+    logFile.print(data.pitch_pid_kd, 3); logFile.print(",");
+    logFile.print(data.yaw_pid_kp, 3); logFile.print(",");
+    logFile.print(data.yaw_pid_ki, 3); logFile.print(",");
+    logFile.print(data.yaw_pid_kd, 3); logFile.print(",");
+    logFile.print(data.altitude_pid_kp, 3); logFile.print(",");
+    logFile.print(data.altitude_pid_ki, 3); logFile.print(",");
+    logFile.print(data.altitude_pid_kd, 3); logFile.print(",");
+    logFile.print(data.headingerror_pid_kp, 3); logFile.print(",");
+    logFile.print(data.headingerror_pid_ki, 3); logFile.print(",");
+    logFile.print(data.headingerror_pid_kd, 3); logFile.print(",");
+    logFile.print(data.rx_throttle_pwm, 0); logFile.print(",");
+    logFile.print(data.rx_aileron_pwm, 0); logFile.print(",");
+    logFile.print(data.rx_elevator_pwm, 0); logFile.print(",");
+    logFile.print(data.rx_rudder_pwm, 0); logFile.print(",");
+    logFile.print(data.rx_mode_pwm, 0);
     logFile.println();
     SPIBus_Unlock();
 }
@@ -164,4 +219,62 @@ void SD_Logger_CloseLog() {
         SPIBus_Unlock();
         Serial.println("Log file closed.");
     }
+}
+
+bool SD_Logger_IsReady() {
+    return g_sd_card_ready && static_cast<bool>(logFile);
+}
+
+bool SD_Logger_SavePIDConfig(float r_kp, float r_ki, float r_kd,
+                             float p_kp, float p_ki, float p_kd,
+                             float y_kp, float y_ki, float y_kd) {
+    if (!g_sd_card_ready || !SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
+        return false;
+    }
+    DeselectLoRaOnSharedSPI();
+
+    if (SD.exists("/pid_config.json")) {
+        SD.remove("/pid_config.json");
+    }
+
+    File file = SD.open("/pid_config.json", FILE_WRITE);
+    if (!file) {
+        SPIBus_Unlock();
+        return false;
+    }
+
+    file.printf("{\"roll\":[%f,%f,%f],\"pitch\":[%f,%f,%f],\"yaw\":[%f,%f,%f]}\n",
+                r_kp, r_ki, r_kd, p_kp, p_ki, p_kd, y_kp, y_ki, y_kd);
+    file.close();
+    SPIBus_Unlock();
+    return true;
+}
+
+bool SD_Logger_LoadPIDConfig(float &r_kp, float &r_ki, float &r_kd,
+                             float &p_kp, float &p_ki, float &p_kd,
+                             float &y_kp, float &y_ki, float &y_kd) {
+    if (!g_sd_card_ready || !SPIBus_Lock(pdMS_TO_TICKS(SPI_BUS_LOCK_TIMEOUT_MS))) {
+        return false;
+    }
+    DeselectLoRaOnSharedSPI();
+
+    if (!SD.exists("/pid_config.json")) {
+        SPIBus_Unlock();
+        return false;
+    }
+
+    File file = SD.open("/pid_config.json", FILE_READ);
+    if (!file) {
+        SPIBus_Unlock();
+        return false;
+    }
+
+    String content = file.readStringUntil('\n');
+    file.close();
+    SPIBus_Unlock();
+
+    int parsed = sscanf(content.c_str(), "{\"roll\":[%f,%f,%f],\"pitch\":[%f,%f,%f],\"yaw\":[%f,%f,%f]}",
+                        &r_kp, &r_ki, &r_kd, &p_kp, &p_ki, &p_kd, &y_kp, &y_ki, &y_kd);
+    
+    return (parsed == 9);
 }

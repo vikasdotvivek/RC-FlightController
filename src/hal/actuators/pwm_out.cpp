@@ -45,9 +45,6 @@ void setRudder(int pulse) {
     ledcWrite(rudder_channel, US_TO_DUTY(pulse));
 }
 
-
-
-
 void pwm_init() {
     // Set up PWM channels with a frequency of 50Hz and 16-bit resolution
     ledcSetup(esc_channel, pwm_freq, pwm_resolution);

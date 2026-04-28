@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GCS — Ground Control Station</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; background: #070b12; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1e2d45; border-radius: 2px; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+    .leaflet-container { background:#050d1a !important; font-family:'DM Sans',sans-serif; }
+    .leaflet-control-zoom a { background:#0e1628 !important; color:#4a7aaa !important; border-color:#172035 !important; }
+    .leaflet-control-zoom a:hover { background:#172035 !important; color:#00d8f0 !important; }
+    .leaflet-tile-pane { filter: brightness(0.85) saturate(0.7); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const T = {
+  bg:'#070b12', panel:'#0b1120', panelAlt:'#0e1628', border:'#172035', borderHi:'#223050',
+  text:'#b8cce0', textDim:'#3d5570', textBright:'#ddeeff',
+  cyan:'#00d8f0', green:'#00e880', amber:'#f0a832', red:'#ff3c58', violet:'#9b6aff', sky:'#4488ff',
+};
+
+const fmtTime = s => {
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+};
+const pad3 = v => v != null ? String(Math.round(((v%360)+360)%360)).padStart(3,'0') : '---';
+const sign = v => v != null ? (v>=0?'+':'')+v.toFixed(1) : '—';
+const fmt1 = v => v != null ? v.toFixed(1) : '—';
+const fmt2 = v => v != null ? v.toFixed(2) : '—';
+const fmt3 = v => v != null ? v.toFixed(3) : '—';
+const fmt0 = v => v != null ? v.toFixed(0) : '—';
+const FM = {0:'MANUAL',1:'STAB',2:'ALT HOLD',3:'AUTO',4:'RTL',5:'LOITER',6:'FBWA',7:'FBWB',8:'CIRCLE'};
+
+/* ─── DATA HOOK — live only, no simulation ───────────────────────── */
+function useGCSData() {
+  const [wsUrl, setWsUrl]   = useState('ws://localhost:8765');
+  const [connected, setConn] = useState(false);
+  const [flightTime, setFT]  = useState(0);
+  const [cmdLog, setCmdLog]  = useState('');
+  const [, forceRender]      = useState(0);
+  const wsRef       = useRef(null);
+  const liveRef     = useRef(null);
+  const pktCountRef = useRef(0);
+  const retryRef    = useRef(null);
+  const connAtRef   = useRef(null);
+  const prevYawRef  = useRef(null);
+  const hist = useRef({ alt:[],spd:[],roll:[],pitch:[],thr:[],altDes:[],rollDes:[],pitchDes:[],yaw:[],yawDes:[] });
+  const MAX = 180;
+
+  // Clock tick — only for flight timer, not for pushing fake data
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (connAtRef.current) setFT(Math.floor((Date.now() - connAtRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const connectWS = useCallback((url) => {
+    clearTimeout(retryRef.current);
+    try { wsRef.current?.close(); } catch {}
+    const ws = new WebSocket(url);
+    ws.onopen = () => {
+      setConn(true);
+      connAtRef.current = Date.now();
+      setFT(0);
+    };
+    ws.onclose = ws.onerror = () => {
+      setConn(false);
+      liveRef.current = null;
+      prevYawRef.current = null;
+      // clear history on disconnect so stale data doesn't linger
+      const h = hist.current;
+      Object.keys(h).forEach(k => h[k] = []);
+      retryRef.current = setTimeout(() => connectWS(url), 3000);
+      forceRender(n => n+1);
+    };
+    ws.onmessage = e => {
+      try {
+        const D = JSON.parse(e.data);
+        if (D.type === 'cmd_log') {
+          setCmdLog(D.msg);
+          return;
+        }
+        if (D.type === 'command_status') {
+          if (D.error) setCmdLog('Error: ' + D.error);
+          return;
+        }
+        liveRef.current = D;
+        pktCountRef.current++;
+
+        // Push to history only when live data arrives
+        const h = hist.current;
+        const push = (a, v) => { if (v != null) { a.push(v); if (a.length > MAX) a.shift(); } };
+        push(h.roll,     D.roll);
+        push(h.rollDes,  D.des_roll);
+        push(h.pitch,    D.pitch);
+        push(h.pitchDes, D.des_pitch);
+        const yawV = D.yaw != null ? ((D.yaw % 360) + 360) % 360 : null;
+        const yawDesV = D.des_yaw != null ? ((D.des_yaw % 360) + 360) % 360 : null;
+        push(h.yaw,      yawV);
+        push(h.yawDes,   yawDesV);
+        push(h.alt,      D.altitude);
+        push(h.altDes,   D.des_altitude);
+        push(h.spd,      D.airspeed);
+        push(h.thr,      D.throttle != null ? D.throttle * 100 : null);
+
+        forceRender(n => n+1);
+      } catch {}
+    };
+    wsRef.current = ws;
+  }, []);
+
+  useEffect(() => {
+    connectWS(wsUrl);
+    return () => { clearTimeout(retryRef.current); try { wsRef.current?.close(); } catch {} };
+  }, []);
+
+  const sendCommand = useCallback((cmdStr) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && cmdStr.trim()) {
+      wsRef.current.send(JSON.stringify({ type: 'command', command: cmdStr }));
+    }
+  }, []);
+
+  const D = liveRef.current;
+
+  // All values are null when no live data — no simulation fallback
+  const roll    = D?.roll    ?? null;
+  const pitch   = D?.pitch   ?? null;
+  const yaw     = D?.yaw     != null ? ((D.yaw % 360) + 360) % 360 : null;
+  const yawDes  = D?.des_yaw != null ? ((D.des_yaw % 360) + 360) % 360 : null;
+  const heading = D?.gps_heading ?? yaw;
+  const alt     = D?.altitude ?? null;
+  const spd     = D?.airspeed ?? null;
+  const thr     = D?.throttle != null ? D.throttle * 100 : null;
+
+  // Yaw rate from successive packets
+  const yawRate = (yaw != null && prevYawRef.current != null)
+    ? (((yaw - prevYawRef.current + 540) % 360) - 180) * 12.5  // approx °/s at ~80ms packet rate
+    : null;
+  if (yaw != null) prevYawRef.current = yaw;
+
+  // Battery — null until added to LoRa struct
+  const vbat    = D?.battery_voltage   ?? null;
+  const batPct  = D?.battery_remaining != null ? D.battery_remaining * 100 : null;
+  const hdop    = D?.gps_hdop          ?? null;
+
+  const armed = D?.arm_status === 1;
+
+  // Link
+  const rssi = D?.rssi ?? null;
+  const snr  = D?.snr  ?? null;
+
+  // GPS
+  const gpsLock = D?.gps_lock_acquired === 1;
+  const sats    = D?.gps_sats        ?? null;
+  const fixQ    = D?.gps_fix_quality ?? null;
+  const gpsFix  = fixQ == null ? '—' : fixQ >= 4 ? 'RTK' : fixQ >= 3 ? '3D' : fixQ >= 2 ? '2D' : 'NO FIX';
+  const gpsSpd  = D?.gps_speed  ?? null;
+  const gpsAlt  = D?.gps_alt    ?? null;
+  const mapLat  = (gpsLock && D?.gps_lat)  ? D.gps_lat  : null;
+  const mapLon  = (gpsLock && D?.gps_long) ? D.gps_long : null;
+
+  // Waypoint
+  const wpDist  = D?.waypoint_distance   ?? null;
+  const wpIdx   = D?.waypoint_index      ?? null;
+  const wpTotal = D?.waypoint_total      ?? null;
+  const wpBear  = D?.waypoint_heading    ?? null;
+  const wpLat   = D?.waypoint_target_lat ?? null;
+  const wpLon   = D?.waypoint_target_lon ?? null;
+  const wpMiss  = D?.waypoint_mission_progress ?? null;
+  const missionPct = wpMiss != null ? Math.round(wpMiss * 100) : null;
+
+  // Mode / status
+  const mode     = D ? (FM[Math.round(D.flightmode)] || String(Math.round(D.flightmode))) : null;
+  const failsafe = (D?.failsafe_status ?? 0) > 0;
+
+  const batWarn = batPct != null && batPct < 30;
+  const batCrit = batPct != null && batPct < 15;
+  const linkWarn = rssi != null && rssi < -85;
+
+  const pid = {
+    roll:  [D?.roll_pid_kp, D?.roll_pid_ki, D?.roll_pid_kd],
+    pitch: [D?.pitch_pid_kp, D?.pitch_pid_ki, D?.pitch_pid_kd],
+    yaw:   [D?.yaw_pid_kp, D?.yaw_pid_ki, D?.yaw_pid_kd]
+  };
+
+  return {
+    roll, pitch, yaw, yawDes, heading, alt, spd, thr, yawRate,
+    vbat, batPct, batWarn, batCrit,
+    rssi, snr, linkWarn, gpsLock, sats, gpsFix, gpsSpd, gpsAlt, hdop,
+    mapLat, mapLon, wpDist, wpIdx, wpTotal, wpBear, wpLat, wpLon, missionPct,
+    mode, failsafe, flightTime, hist: hist.current,
+    connected, wsUrl, setWsUrl, connectWS,
+    pktCount: pktCountRef.current, armed,
+    pid, sendCommand, cmdLog
+  };
+}
+
+/* ─── ARTIFICIAL HORIZON ─────────────────────────────────────────── */
+function ArtificialHorizon({ roll, pitch, hasData, size = 224 }) {
+  const ref = useRef(null);
+  const r = roll ?? 0, p = pitch ?? 0;
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W=size, H=size, cx=W/2, cy=H/2, R=W/2-2;
+    ctx.clearRect(0,0,W,H);
+    ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.clip();
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(r*Math.PI/180);
+    const po = p*2.8;
+    const sg = ctx.createLinearGradient(0,-R,0,po);
+    if (!hasData) {
+      sg.addColorStop(0,'#0a1020'); sg.addColorStop(1,'#0a1020');
+    } else {
+      sg.addColorStop(0,'#08264a'); sg.addColorStop(1,'#0d3d7a');
+    }
+    ctx.fillStyle=sg; ctx.fillRect(-R,-R*2,R*2,R*2+po);
+    const eg = ctx.createLinearGradient(0,po,0,R);
+    if (!hasData) {
+      eg.addColorStop(0,'#0a1020'); eg.addColorStop(1,'#0a1020');
+    } else {
+      eg.addColorStop(0,'#5a2800'); eg.addColorStop(1,'#321500');
+    }
+    ctx.fillStyle=eg; ctx.fillRect(-R,po,R*2,R*2);
+    ctx.strokeStyle=hasData?'rgba(255,255,255,0.9)':'rgba(255,255,255,0.2)';
+    ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(-R,po); ctx.lineTo(R,po); ctx.stroke();
+    if (hasData) {
+      for (let d=-30;d<=30;d+=5) {
+        if(d===0)continue;
+        const y=po-d*2.8, isMaj=d%10===0, len=isMaj?44:22;
+        ctx.strokeStyle=`rgba(255,255,255,${isMaj?0.7:0.35})`; ctx.lineWidth=isMaj?1.2:0.8;
+        ctx.beginPath(); ctx.moveTo(-len/2,y); ctx.lineTo(len/2,y); ctx.stroke();
+        if(isMaj){
+          ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font=`${size*0.066}px Space Mono`;
+          ctx.textAlign='left'; ctx.fillText(Math.abs(d),len/2+5,y+4);
+          ctx.textAlign='right'; ctx.fillText(Math.abs(d),-len/2-5,y+4);
+        }
+      }
+    }
+    ctx.restore();
+    const rollTicks=[-60,-45,-30,-20,-10,0,10,20,30,45,60];
+    rollTicks.forEach(a=>{
+      const rad=(a-90)*Math.PI/180, len=a%30===0?10:6;
+      ctx.strokeStyle=`rgba(255,255,255,${a%30===0?0.5:0.25})`; ctx.lineWidth=a%30===0?1.5:1;
+      ctx.beginPath(); ctx.moveTo(cx+Math.cos(rad)*(R-2),cy+Math.sin(rad)*(R-2));
+      ctx.lineTo(cx+Math.cos(rad)*(R-2-len),cy+Math.sin(rad)*(R-2-len)); ctx.stroke();
+    });
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(r*Math.PI/180);
+    ctx.beginPath(); ctx.moveTo(0,-(R-3)); ctx.lineTo(-5,-(R-14)); ctx.lineTo(5,-(R-14));
+    ctx.closePath(); ctx.fillStyle=hasData?'#ffcc00':'#3d5570'; ctx.fill();
+    ctx.restore();
+    const wCol=hasData?'#ffcc00':'#3d5570';
+    ctx.strokeStyle=wCol; ctx.lineWidth=2.5; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(cx-56,cy); ctx.lineTo(cx-16,cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx+16,cy); ctx.lineTo(cx+56,cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx,cy-14); ctx.lineTo(cx,cy-4); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx,cy,3.5,0,Math.PI*2); ctx.fillStyle=wCol; ctx.fill();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+    ctx.strokeStyle=T.borderHi; ctx.lineWidth=2; ctx.stroke();
+    // No-data overlay
+    if (!hasData) {
+      ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fillStyle='rgba(7,11,18,0.55)'; ctx.fill();
+      ctx.font='bold 13px DM Sans'; ctx.fillStyle=T.textDim; ctx.textAlign='center';
+      ctx.fillText('NO DATA', cx, cy);
+    }
+  }, [r, p, hasData, size]);
+  return <canvas ref={ref} width={size} height={size} style={{ display:'block', borderRadius:'50%' }} />;
+}
+
+/* ─── HEADING TAPE ───────────────────────────────────────────────── */
+function HeadingTape({ heading, hasData, width = 224 }) {
+  const ref = useRef(null);
+  const h = heading ?? 0;
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W=width, H=44;
+    ctx.clearRect(0,0,W,H); ctx.fillStyle=T.panel; ctx.fillRect(0,0,W,H);
+    if (hasData) {
+      const span=80, ppd=W/span, start=h-span/2;
+      ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,H); ctx.clip();
+      for(let d=Math.floor(start/5)*5; d<=start+span+5; d+=5){
+        const x=(d-start)*ppd, norm=((d%360)+360)%360;
+        const isMaj=d%10===0, isCard=[0,90,180,270].includes(norm);
+        ctx.strokeStyle=isCard?T.cyan:isMaj?T.textDim:T.borderHi; ctx.lineWidth=isCard?2:1;
+        ctx.beginPath(); ctx.moveTo(x,H-(isMaj?14:7)); ctx.lineTo(x,H); ctx.stroke();
+        if(isMaj){
+          let lbl=isCard?['N','E','S','W'][[0,90,180,270].indexOf(norm)]:String(norm);
+          ctx.fillStyle=isCard?T.cyan:T.textDim;
+          ctx.font=`${isCard?'bold ':''}10px Space Mono`; ctx.textAlign='center';
+          ctx.fillText(lbl,x,H-18);
+        }
+      }
+      ctx.restore();
+      ctx.beginPath(); ctx.moveTo(W/2-6,8); ctx.lineTo(W/2+6,8); ctx.lineTo(W/2,18);
+      ctx.closePath(); ctx.fillStyle=T.cyan; ctx.fill();
+      const hw=36, hh=20;
+      ctx.fillStyle=T.cyan; ctx.beginPath(); ctx.roundRect(W/2-hw/2,H-hh,hw,hh,3); ctx.fill();
+      ctx.fillStyle=T.bg; ctx.font='bold 11px Space Mono'; ctx.textAlign='center';
+      ctx.fillText(pad3(h),W/2,H-6);
+    } else {
+      ctx.font='bold 11px Space Mono'; ctx.fillStyle=T.textDim;
+      ctx.textAlign='center'; ctx.fillText('---', W/2, H/2+4);
+    }
+    ctx.strokeStyle=T.border; ctx.lineWidth=1; ctx.strokeRect(0,0,W,H);
+  }, [h, hasData, width]);
+  return <canvas ref={ref} width={width} height={44} style={{ display:'block' }} />;
+}
+
+/* ─── DUAL CHART ─────────────────────────────────────────────────── */
+function DualChart({ actual=[], desired=[], color=T.cyan, min, max, label, unit, height=68 }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W=cv.width, H=height;
+    ctx.clearRect(0,0,W,H);
+    if (actual.length < 2) {
+      ctx.fillStyle=T.textDim; ctx.font='10px DM Sans'; ctx.textAlign='center';
+      ctx.fillText('Waiting for data…', W/2, H/2+4);
+      return;
+    }
+    const all=[...actual,...desired];
+    const lo=min??Math.min(...all)-1, hi=max??Math.max(...all)+1, rng=hi-lo||1;
+    const tx=(i,len)=>(i/(len-1))*W, ty=v=>H-((v-lo)/rng)*H;
+    ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=1;
+    ctx.fillStyle=T.textDim; ctx.font='8px Space Mono'; ctx.textAlign='left';
+    for(let i=0;i<=4;i++){
+      const y=(i/4)*H; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+      if(i<4) ctx.fillText(((hi-(i/4)*rng).toFixed(0)),3,y+9);
+    }
+    if(lo<0&&hi>0){
+      const zy=ty(0); ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1;
+      ctx.setLineDash([3,4]); ctx.beginPath(); ctx.moveTo(0,zy); ctx.lineTo(W,zy); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if(desired.length>1){
+      ctx.strokeStyle=color+'70'; ctx.lineWidth=1.5; ctx.lineJoin='round';
+      ctx.setLineDash([5,4]); ctx.beginPath();
+      desired.forEach((v,i)=>i===0?ctx.moveTo(tx(i,desired.length),ty(v)):ctx.lineTo(tx(i,desired.length),ty(v)));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    const grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,color+'38'); grad.addColorStop(1,color+'00');
+    ctx.fillStyle=grad; ctx.beginPath(); ctx.moveTo(tx(0,actual.length),H);
+    actual.forEach((v,i)=>ctx.lineTo(tx(i,actual.length),ty(v)));
+    ctx.lineTo(tx(actual.length-1,actual.length),H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.beginPath();
+    actual.forEach((v,i)=>i===0?ctx.moveTo(tx(i,actual.length),ty(v)):ctx.lineTo(tx(i,actual.length),ty(v)));
+    ctx.stroke();
+    const alx=tx(actual.length-1,actual.length), aly=ty(actual[actual.length-1]);
+    ctx.beginPath(); ctx.arc(alx,aly,3.5,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+    ctx.beginPath(); ctx.arc(alx,aly,7,0,Math.PI*2); ctx.strokeStyle=color+'55'; ctx.lineWidth=1; ctx.stroke();
+    if(desired.length>1){
+      const dlx=tx(desired.length-1,desired.length), dly=ty(desired[desired.length-1]);
+      ctx.beginPath(); ctx.arc(dlx,dly,2.5,0,Math.PI*2); ctx.fillStyle=color+'90'; ctx.fill();
+    }
+  }, [actual, desired, color, min, max, height]);
+
+  const actVal = actual.length ? actual[actual.length-1] : null;
+  const desVal = desired.length ? desired[desired.length-1] : null;
+  const err    = actVal != null && desVal != null ? actVal - desVal : null;
+  return (
+    <div style={{ background:T.panel, border:`1px solid ${T.border}`, borderRadius:6, padding:'9px 12px', display:'flex', flexDirection:'column', gap:7, overflow:'hidden' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <span style={{ font:'600 10px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.1em' }}>{label}</span>
+        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={color} strokeWidth="2"/></svg>
+            <span style={{ font:'9px DM Sans', color:T.textDim }}>Actual</span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={color+'80'} strokeWidth="1.5" strokeDasharray="4 3"/></svg>
+            <span style={{ font:'9px DM Sans', color:T.textDim }}>Desired</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:16, alignItems:'baseline' }}>
+        <div style={{ display:'flex', alignItems:'baseline', gap:3 }}>
+          <span style={{ font:'bold 19px Space Mono', color:actVal!=null?T.textBright:T.textDim, lineHeight:1 }}>
+            {actVal != null ? actVal.toFixed(1) : '—'}
+          </span>
+          <span style={{ font:'400 9px DM Sans', color:T.textDim }}>{unit}</span>
+        </div>
+        {desVal != null && <div style={{ display:'flex', alignItems:'baseline', gap:3 }}>
+          <span style={{ font:'400 13px Space Mono', color:color+'90', lineHeight:1 }}>{desVal.toFixed(1)}</span>
+          <span style={{ font:'400 9px DM Sans', color:T.textDim }}>des</span>
+        </div>}
+        {err != null && <div style={{ marginLeft:'auto', display:'flex', alignItems:'baseline', gap:2 }}>
+          <span style={{ font:'400 9px DM Sans', color:T.textDim }}>err</span>
+          <span style={{ font:'bold 12px Space Mono', color:Math.abs(err)>8?T.amber:T.textDim }}>
+            {err>=0?'+':''}{err.toFixed(1)}
+          </span>
+        </div>}
+      </div>
+      <canvas ref={ref} width={400} height={height} style={{ display:'block', width:'100%', height }} />
+    </div>
+  );
+}
+
+/* ─── ATOMS ──────────────────────────────────────────────────────── */
+function Dot({ s='off', size=8 }) {
+  const clr = { ok:T.green, warn:T.amber, err:T.red, off:T.textDim }[s] || T.textDim;
+  return <span style={{ display:'inline-block', width:size, height:size, borderRadius:'50%', background:clr, flexShrink:0,
+    boxShadow:s!=='off'?`0 0 7px ${clr}88`:'none', animation:s==='err'?'blink 1s infinite':'none' }} />;
+}
+function Row({ label, value, unit, warn, crit, mono=true }) {
+  const isNull = value == null || value === '—';
+  const clr = isNull ? T.textDim : crit ? T.red : warn ? T.amber : T.textBright;
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 0', borderBottom:`1px solid ${T.border}30` }}>
+      <span style={{ font:'400 11px DM Sans', color:T.textDim }}>{label}</span>
+      <span style={{ font:`${mono?'bold 12px Space Mono':'500 12px DM Sans'}`, color:clr }}>
+        {isNull ? '—' : value}{!isNull && unit && <span style={{ font:'400 10px DM Sans', color:T.textDim, marginLeft:3 }}>{unit}</span>}
+      </span>
+    </div>
+  );
+}
+function PidRow({ label, vals }) {
+  const isNull = vals[0] == null;
+  const c = isNull ? T.textDim : T.textBright;
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 0', borderBottom:`1px solid ${T.border}30` }}>
+      <span style={{ font:'400 11px DM Sans', color:T.textDim, width:40 }}>{label}</span>
+      <div style={{ display:'flex', flex:1, justifyContent:'flex-end', gap:10, font:'bold 12px Space Mono', color:c }}>
+        <span style={{width:50, textAlign:'right'}}>{isNull?'—':fmt2(vals[0])}</span>
+        <span style={{width:50, textAlign:'right'}}>{isNull?'—':fmt2(vals[1])}</span>
+        <span style={{width:50, textAlign:'right'}}>{isNull?'—':fmt2(vals[2])}</span>
+      </div>
+    </div>
+  );
+}
+function SH({ label, accent }) {
+  return <div style={{ font:'600 9px DM Sans', color:accent||T.textDim, textTransform:'uppercase', letterSpacing:'0.14em', borderBottom:`1px solid ${T.border}`, paddingBottom:7, marginBottom:9 }}>{label}</div>;
+}
+function Card({ children, style }) {
+  return <div style={{ background:T.panelAlt, border:`1px solid ${T.border}`, borderRadius:7, padding:'10px 12px', ...style }}>{children}</div>;
+}
+function Bar({ pct, color=T.cyan, h=4 }) {
+  return <div style={{ height:h, background:T.border, borderRadius:h/2, overflow:'hidden' }}>
+    <div style={{ width:`${pct??0}%`, height:'100%', background:pct!=null?color:T.border, borderRadius:h/2, transition:'width 0.6s' }} />
+  </div>;
+}
+function Strip({ label, value, range, unit='°', color=T.cyan }) {
+  const pct = value != null ? Math.max(2,Math.min(98,(value/range)*50+50)) : 50;
+  const warn = value != null && Math.abs(value) > range*0.75;
+  const c = warn ? T.amber : (value != null ? color : T.textDim);
+  return (
+    <div style={{ marginBottom:7 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+        <span style={{ font:'400 10px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</span>
+        <span style={{ font:'bold 11px Space Mono', color:c }}>
+          {value != null ? `${value>=0?'+':''}${value.toFixed(1)}${unit}` : '—'}
+        </span>
+      </div>
+      <div style={{ height:4, background:T.border, borderRadius:2, position:'relative' }}>
+        <div style={{ position:'absolute', left:'50%', top:0, width:1, height:'100%', background:T.borderHi }} />
+        {value != null && <div style={{ position:'absolute', top:0, left:`${pct}%`, transform:'translateX(-50%)', width:8, height:'100%', background:c, borderRadius:2, boxShadow:`0 0 8px ${c}`, transition:'left 0.1s' }} />}
+      </div>
+    </div>
+  );
+}
+function RssiBars({ rssi }) {
+  if (rssi == null) {
+    return <div style={{ display:'flex', alignItems:'center', gap:4, height:16 }}>
+      {[0,1,2,3,4].map(i=><div key={i} style={{ width:5, height:5+i*2.5, background:T.border, borderRadius:1 }}/>)}
+      <span style={{ font:'10px Space Mono', color:T.textDim, marginLeft:4 }}>— dBm</span>
+    </div>;
+  }
+  const pct=Math.max(0,Math.min(1,(rssi+120)/80)), filled=Math.round(pct*5);
+  const clr=pct>0.6?T.green:pct>0.35?T.amber:T.red;
+  return <div style={{ display:'flex', alignItems:'flex-end', gap:3, height:16 }}>
+    {[0,1,2,3,4].map(i=>(
+      <div key={i} style={{ width:5, height:5+i*2.5, background:i<filled?clr:T.border, borderRadius:1, transition:'background 0.3s' }}/>
+    ))}
+    <span style={{ font:'10px Space Mono', color:clr, marginLeft:4, alignSelf:'center' }}>{Math.round(rssi)} dBm</span>
+  </div>;
+}
+function BigM({ label, value, unit, color=T.textBright, warn, crit }) {
+  const isNull = value == null || value === '—';
+  const c = isNull ? T.textDim : crit ? T.red : warn ? T.amber : color;
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'0 18px', borderRight:`1px solid ${T.border}` }}>
+      <span style={{ font:'500 9px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:1 }}>{label}</span>
+      <span style={{ font:'bold 26px Space Mono', color:c, lineHeight:1.05 }}>{isNull ? '—' : value}</span>
+      <span style={{ font:'400 9px DM Sans', color:T.textDim, marginTop:1 }}>{unit}</span>
+    </div>
+  );
+}
+function CommandTerminal({ sendCommand, cmdLog }) {
+  const [cmd, setCmd] = useState('');
+  const [history, setHistory] = useState([]);
+  const [hIdx, setHIdx] = useState(-1);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && cmd.trim()) {
+      sendCommand(cmd);
+      setHistory(prev => [...prev, cmd]);
+      setHIdx(-1);
+      setCmd('');
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (history.length > 0) {
+        const nextIdx = hIdx === -1 ? history.length - 1 : Math.max(0, hIdx - 1);
+        setHIdx(nextIdx);
+        setCmd(history[nextIdx]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (hIdx !== -1) {
+        const nextIdx = hIdx + 1;
+        if (nextIdx >= history.length) {
+          setHIdx(-1);
+          setCmd('');
+        } else {
+          setHIdx(nextIdx);
+          setCmd(history[nextIdx]);
+        }
+      }
+    }
+  };
+
+  const logColor = !cmdLog ? T.textDim : cmdLog.includes('[ACK]') ? T.green : (cmdLog.includes('failed') || cmdLog.includes('Error')) ? T.red : T.amber;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
+      <div style={{ display:'flex', gap:6 }}>
+        <input value={cmd} onChange={e=>{setCmd(e.target.value); setHIdx(-1);}}
+               onKeyDown={handleKeyDown}
+               placeholder="e.g. pid roll 20 0 0.1"
+               style={{ flex:1, background:T.bg, border:`1px solid ${T.borderHi}`, color:T.textBright, padding:'5px 8px', borderRadius:4, font:'11px Space Mono', outline:'none' }} />
+        <button onClick={()=>{if(cmd.trim()){sendCommand(cmd);setHistory(p=>[...p,cmd]);setHIdx(-1);setCmd('');}}}
+                style={{ background:T.cyan+'22', color:T.cyan, border:`1px solid ${T.cyan}55`, padding:'0 12px', borderRadius:4, cursor:'pointer', font:'bold 10px DM Sans' }}>SEND</button>
+      </div>
+      {cmdLog && (
+        <div style={{ font:'400 10px Space Mono', color:logColor, background:T.bg, padding:'4px 6px', borderRadius:3, border:`1px solid ${T.border}` }}>
+          {cmdLog}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── LEAFLET MAP ────────────────────────────────────────────────── */
+function MissionMap({ lat, lon, heading, wpLat, wpLon, wpIdx }) {
+  const divRef=useRef(null), mapRef=useRef(null), planeRef=useRef(null);
+  const trailPoly=useRef(null), wpLine=useRef(null), wpMarker=useRef(null);
+  const trailPts=useRef([]), lastWpIdx=useRef(-1), centered=useRef(false);
+
+  useEffect(() => {
+    if (mapRef.current || !divRef.current) return;
+    const m = L.map(divRef.current, { zoomControl:false, attributionControl:false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:20, subdomains:'abcd' }).addTo(m);
+    L.control.zoom({ position:'bottomright' }).addTo(m);
+    trailPoly.current = L.polyline([], { color:T.cyan, weight:1.5, opacity:0.55 }).addTo(m);
+    wpLine.current    = L.polyline([], { color:T.violet, weight:1, dashArray:'4 5', opacity:0.4 }).addTo(m);
+    m.setView([40.4284, -86.9151], 15);
+    mapRef.current = m;
+    return () => { m.remove(); mapRef.current = null; };
+  }, []);
+
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m || lat == null || lon == null) return;
+    const hdg = heading ?? 0;
+    const icon = L.divIcon({
+      html:`<svg viewBox="0 0 22 22" width="22" height="22" style="transform:rotate(${hdg}deg);transform-origin:center;filter:drop-shadow(0 0 4px ${T.cyan})">
+              <path d="M11 1L14.5 9H12V13L17 12V14.5L12 13.5V19H14L11 22L8 19H10V13.5L5 14.5V12L10 13V9H7.5L11 1Z" fill="${T.cyan}" opacity="0.95"/>
+            </svg>`,
+      className:'', iconSize:[22,22], iconAnchor:[11,11]
+    });
+    if (!planeRef.current) {
+      planeRef.current = L.marker([lat,lon], { icon, zIndexOffset:1000 }).addTo(m);
+      if (!centered.current) { m.setView([lat,lon], 16); centered.current=true; }
+    } else {
+      planeRef.current.setLatLng([lat,lon]).setIcon(icon);
+    }
+    trailPts.current.push([lat,lon]);
+    if (trailPts.current.length > 600) trailPts.current.shift();
+    trailPoly.current?.setLatLngs(trailPts.current);
+    if (wpLat && wpLon) wpLine.current?.setLatLngs([[lat,lon],[wpLat,wpLon]]);
+  }, [lat, lon, heading, wpLat, wpLon]);
+
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m || !wpLat || !wpLon) return;
+    const mkIcon = (idx, done) => L.divIcon({
+      html:`<div style="background:${done?T.green:T.bg};color:${done?T.bg:T.cyan};font-size:8px;font-weight:700;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid ${done?T.green:T.cyan}">${idx}</div>`,
+      className:'', iconSize:[18,18], iconAnchor:[9,9]
+    });
+    if (!wpMarker.current) {
+      wpMarker.current = L.marker([wpLat,wpLon], { icon:mkIcon(wpIdx,false) }).addTo(m);
+    } else {
+      wpMarker.current.setLatLng([wpLat,wpLon]).setIcon(mkIcon(wpIdx,false));
+    }
+    if (wpIdx !== lastWpIdx.current && lastWpIdx.current > 0)
+      L.circleMarker([wpLat,wpLon], { radius:5, fillColor:T.green, color:T.green, weight:1, fillOpacity:0.85 }).addTo(m);
+    lastWpIdx.current = wpIdx;
+  }, [wpLat, wpLon, wpIdx]);
+
+  return (
+    <div style={{ position:'relative', width:'100%', height:'100%' }}>
+      <div ref={divRef} style={{ width:'100%', height:'100%' }} />
+      {lat == null && (
+        <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center',
+                      background:'rgba(7,11,18,0.7)', zIndex:999, flexDirection:'column', gap:8 }}>
+          <span style={{ font:'600 12px DM Sans', color:T.textDim }}>Waiting for GPS lock…</span>
+          <span style={{ font:'9px Space Mono', color:T.textDim+'80' }}>Map will appear on first fix</span>
+        </div>
+      )}
+      {lat != null && <div style={{ position:'absolute', bottom:8, left:10, font:'9px Space Mono',
+                                     color:T.textDim+'cc', zIndex:999, pointerEvents:'none' }}>
+        {Math.abs(lat).toFixed(4)}° {lat>=0?'N':'S'}&nbsp;&nbsp;{Math.abs(lon).toFixed(4)}° {lon<0?'W':'E'}
+      </div>}
+    </div>
+  );
+}
+
+/* ─── APP ─────────────────────────────────────────────────────────── */
+function App() {
+  const tm = useGCSData();
+  const [editingUrl, setEditingUrl] = useState(false);
+  const { batWarn, batCrit, linkWarn } = tm;
+  const modeColor = tm.mode ? ({ MANUAL:T.textDim, STAB:T.sky, 'ALT HOLD':T.green, AUTO:T.cyan, RTL:T.red, LOITER:T.green, FBWA:T.amber, FBWB:T.amber, CIRCLE:T.sky }[tm.mode] || T.cyan) : T.textDim;
+
+  const yawMin = tm.hist.yaw.length ? Math.min(...tm.hist.yaw) - 5 : null;
+  const yawMax = tm.hist.yaw.length ? Math.max(...tm.hist.yaw) + 5 : null;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', width:'100vw', background:T.bg, color:T.text, fontFamily:'DM Sans,sans-serif', overflow:'hidden' }}>
+
+      {/* ── TOP BAR ──────────────────────────────────────────────── */}
+      <div style={{ height:50, flexShrink:0, background:T.panel, borderBottom:`1px solid ${T.border}`, display:'flex', alignItems:'center', padding:'0 14px', gap:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:9, paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <div style={{ width:30, height:30, borderRadius:7, background:`${T.cyan}18`, border:`1.5px solid ${T.cyan}55`, display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1L14 9L8 5.5L2 9L8 1Z" fill={T.cyan}/>
+              <path d="M8 15L6 11H10L8 15Z" fill={T.cyan} opacity="0.5"/>
+            </svg>
+          </div>
+          <div>
+            <div style={{ font:'700 11px Space Mono', color:T.textBright, letterSpacing:'0.07em' }}>GCS</div>
+            <div style={{ font:'400 9px DM Sans', color:T.textDim }}>RC Plane</div>
+          </div>
+        </div>
+
+        {/* Connection */}
+        <div style={{ display:'flex', alignItems:'center', gap:7, paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <Dot s={tm.connected?'ok':'err'} />
+          <div>
+            <div style={{ font:'600 11px DM Sans', color:tm.connected?T.green:T.red, lineHeight:1.2 }}>
+              {tm.connected ? 'CONNECTED' : 'DISCONNECTED'}
+            </div>
+            {editingUrl
+              ? <input defaultValue={tm.wsUrl} autoFocus
+                  style={{ font:'400 9px Space Mono', color:T.textDim, background:'transparent', border:'none', borderBottom:`1px solid ${T.borderHi}`, outline:'none', width:155 }}
+                  onBlur={e=>{tm.setWsUrl(e.target.value);tm.connectWS(e.target.value);setEditingUrl(false);}}
+                  onKeyDown={e=>{if(e.key==='Enter')e.target.blur();if(e.key==='Escape')setEditingUrl(false);}}/>
+              : <div style={{ font:'400 9px Space Mono', color:T.textDim, cursor:'pointer' }} onClick={()=>setEditingUrl(true)} title="Click to edit">{tm.wsUrl}</div>
+            }
+          </div>
+        </div>
+
+        {/* Arm status */}
+        <div style={{ paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <div style={{
+            background: !tm.connected ? 'transparent' : tm.armed ? `${T.green}22` : `${T.red}22`,
+            color:       !tm.connected ? T.textDim     : tm.armed ? T.green        : T.red,
+            border:      `1px solid ${!tm.connected ? T.border : tm.armed ? T.green+'55' : T.red+'55'}`,
+            font:'bold 11px Space Mono', padding:'4px 12px', borderRadius:4, letterSpacing:'0.05em'
+          }}>
+            {!tm.connected ? 'ARM STATUS' : tm.armed ? 'ARMED' : 'DISARMED'}
+          </div>
+        </div>
+
+        {/* Mode */}
+        <div style={{ paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <div style={{ background:tm.mode?modeColor+'22':'transparent', color:tm.mode?modeColor:T.textDim, border:`1px solid ${tm.mode?modeColor+'55':T.border}`, font:'bold 11px Space Mono', padding:'4px 12px', borderRadius:4, letterSpacing:'0.05em' }}>
+            {tm.mode ?? ' FLIGHT MODE'}
+          </div>
+        </div>
+
+        <BigM label="Airspeed"  value={tm.spd != null ? tm.spd.toFixed(1) : null}          unit="m/s"   color={T.cyan} />
+        <BigM label="Altitude"  value={tm.alt != null ? tm.alt.toFixed(1) : null}          unit="m AGL" />
+        <BigM label="Heading"   value={tm.heading != null ? pad3(tm.heading)+'°' : null}   unit="MAG" />
+        <BigM label="Throttle"  value={tm.thr != null ? Math.round(tm.thr)+'%' : null}     unit=""      warn={tm.thr!=null&&tm.thr>80} />
+
+        <div style={{ flex:1 }} />
+
+        {/* Battery */}
+        <div style={{ display:'flex', flexDirection:'column', gap:4, paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+            <span style={{ font:'400 9px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.1em' }}>Battery</span>
+            <span style={{ font:'bold 12px Space Mono', color:batCrit?T.red:batWarn?T.amber:tm.vbat!=null?T.green:T.textDim }}>
+              {tm.vbat != null ? `${tm.vbat.toFixed(2)}V` : '—'} · {tm.batPct != null ? `${Math.round(tm.batPct)}%` : '—'}
+            </span>
+          </div>
+          <Bar pct={tm.batPct} color={batCrit?T.red:batWarn?T.amber:T.green} h={5} />
+        </div>
+
+        {/* LoRa */}
+        <div style={{ display:'flex', flexDirection:'column', gap:4, paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <span style={{ font:'400 9px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.1em' }}>LoRa Link</span>
+          <RssiBars rssi={tm.rssi} />
+        </div>
+
+        {/* GPS */}
+        <div style={{ display:'flex', flexDirection:'column', gap:3, paddingRight:14, borderRight:`1px solid ${T.border}`, marginRight:14 }}>
+          <span style={{ font:'400 9px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.1em' }}>GPS</span>
+          <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+            <Dot s={!tm.connected?'off':tm.gpsLock?'ok':'err'} size={7} />
+            <span style={{ font:'bold 11px Space Mono', color:tm.gpsLock?T.green:T.textDim }}>{tm.gpsFix}</span>
+            <span style={{ font:'10px Space Mono', color:T.textDim }}>{tm.sats != null ? `${tm.sats} sats` : '—'}</span>
+          </div>
+        </div>
+
+        {/* Time */}
+        <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+          <span style={{ font:'400 9px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.1em' }}>Flight Time</span>
+          <span style={{ font:'bold 14px Space Mono', color:tm.connected?T.textBright:T.textDim }}>
+            {tm.connected ? fmtTime(tm.flightTime) : '--:--:--'}
+          </span>
+        </div>
+      </div>
+
+      {/* ── MAIN ─────────────────────────────────────────────────── */}
+      <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
+
+        {/* LEFT */}
+        <div style={{ width:260, flexShrink:0, background:T.panel, borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', padding:11, gap:10, overflowY:'auto' }}>
+          <div>
+            <SH label="Attitude Indicator" accent={T.cyan} />
+            <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
+              <ArtificialHorizon roll={tm.roll} pitch={tm.pitch} hasData={tm.connected && tm.roll!=null} size={214} />
+            </div>
+            <HeadingTape heading={tm.heading} hasData={tm.connected && tm.heading!=null} width={236} />
+          </div>
+          <Card>
+            <Strip label="Roll"     value={tm.roll}     range={45} color={T.cyan} />
+            <Strip label="Pitch"    value={tm.pitch}    range={30} color={T.amber} />
+            <Strip label="Yaw Rate" value={tm.yawRate != null ? Math.min(20,Math.max(-20,tm.yawRate)) : null} range={20} unit="°/s" color={T.violet} />
+          </Card>
+          <div>
+            <SH label="Sensor Health" />
+            {[
+              { n:'GPS Module',    s:!tm.connected?'off':tm.gpsLock?'ok':'err', v:tm.connected ? `${tm.gpsFix} · ${tm.sats??'—'} sats` : '—' },
+              { n:'Barometer',     s:!tm.connected?'off':tm.alt!=null?'ok':'warn', v:tm.connected&&tm.alt!=null ? `${tm.alt.toFixed(1)} m` : '—' },
+              { n:'Airspeed Tube', s:!tm.connected?'off':tm.spd!=null?'ok':'warn', v:tm.connected&&tm.spd!=null ? `${tm.spd.toFixed(1)} m/s` : '—' },
+              { n:'IMU / Attitude',s:!tm.connected?'off':tm.roll!=null?'ok':'warn', v:tm.connected&&tm.roll!=null ? 'Cal OK' : '—' },
+              { n:'Failsafe',      s:!tm.connected?'off':tm.failsafe?'err':'ok', v:tm.connected ? (tm.failsafe?'ACTIVE':'OK') : '—' },
+              { n:'LoRa Link',     s:!tm.connected?'off':linkWarn?'warn':'ok', v:tm.rssi!=null ? `${tm.rssi.toFixed(0)} dBm` : '—' },
+            ].map(r=>(
+              <div key={r.n} style={{ display:'flex', alignItems:'center', gap:7, padding:'5px 0', borderBottom:`1px solid ${T.border}25` }}>
+                <Dot s={r.s} size={7} />
+                <span style={{ font:'400 11px DM Sans', color:T.text, flex:1 }}>{r.n}</span>
+                <span style={{ font:'11px Space Mono', color:T.textDim }}>{r.v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ font:'9px Space Mono', color:T.textDim+'80', textAlign:'center' }}>
+            {tm.connected ? `${tm.pktCount.toLocaleString()} pkts rx` : 'Waiting for connection…'}
+          </div>
+        </div>
+
+        {/* CENTER */}
+        <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0, padding:11, gap:10, overflow:'hidden' }}>
+          <div style={{ background:'#050d1a', border:`1px solid ${T.border}`, borderRadius:7, overflow:'hidden', flexShrink:0, height:220 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'5px 12px', borderBottom:`1px solid ${T.border}`, background:T.panel }}>
+              <span style={{ font:'600 9px DM Sans', color:T.textDim, textTransform:'uppercase', letterSpacing:'0.12em' }}>Mission Map</span>
+              {tm.connected && !tm.gpsLock && <span style={{ font:'9px DM Sans', color:T.amber }}>Waiting for GPS lock…</span>}
+              {!tm.connected && <span style={{ font:'9px DM Sans', color:T.textDim }}>Disconnected — map ready on GPS lock</span>}
+            </div>
+            <div style={{ height:182 }}>
+              <MissionMap lat={tm.mapLat} lon={tm.mapLon} heading={tm.heading}
+                          wpLat={tm.wpLat} wpLon={tm.wpLon} wpIdx={tm.wpIdx} />
+            </div>
+          </div>
+          <div style={{ flex:1, display:'grid', gridTemplateColumns:'1fr 1fr', gridTemplateRows:'1fr 1fr', gap:9, minHeight:0 }}>
+            <DualChart actual={[...tm.hist.roll]}  desired={[...tm.hist.rollDes]}  color={T.cyan}   label="Roll"     unit="°"   min={-50} max={50}       height={58} />
+            <DualChart actual={[...tm.hist.pitch]} desired={[...tm.hist.pitchDes]} color={T.amber}  label="Pitch"    unit="°"   min={-30} max={30}       height={58} />
+            <DualChart actual={[...tm.hist.yaw]}   desired={[...tm.hist.yawDes]}   color={T.violet} label="Yaw"      unit="°"   min={yawMin} max={yawMax} height={58} />
+            <DualChart actual={[...tm.hist.alt]}   desired={[...tm.hist.altDes]}   color={T.green}  label="Altitude" unit="m"   min={null} max={null}    height={58} />
+          </div>
+        </div>
+
+        {/* RIGHT */}
+        <div style={{ width:300, flexShrink:0, background:T.panel, borderLeft:`1px solid ${T.border}`, display:'flex', flexDirection:'column', padding:11, gap:10, overflowY:'auto' }}>
+          <Card>
+            <SH label="Attitude" />
+            <Row label="Roll"     value={sign(tm.roll)}             unit="°" />
+            <Row label="Pitch"    value={sign(tm.pitch)}            unit="°" />
+            <Row label="Heading"  value={tm.heading!=null?pad3(tm.heading):null} unit="°" />
+            <Row label="Yaw Rate" value={tm.yawRate!=null?sign(tm.yawRate):null} unit="°/s" />
+          </Card>
+          <Card>
+            <SH label="GPS" accent={T.green} />
+            <Row label="Fix Type"   value={tm.gpsFix !== '—' ? tm.gpsFix : null}  mono={false} />
+            <Row label="Satellites" value={tm.sats}                                unit="sats" />
+            <Row label="Altitude"   value={fmt1(tm.gpsAlt ?? tm.alt)}             unit="m MSL" />
+            <Row label="GPS Speed"  value={fmt1(tm.gpsSpd)}                       unit="m/s" />
+            <Row label="HDOP"       value={fmt2(tm.hdop)} />
+          </Card>
+          <Card>
+            <SH label="Active Waypoint" accent={T.cyan} />
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 0', marginBottom:4, borderBottom:`1px solid ${T.border}` }}>
+              <span style={{ font:'400 11px DM Sans', color:T.textDim }}>Waypoint</span>
+              <span style={{ font:'bold 18px Space Mono', color:tm.wpIdx!=null?T.cyan:T.textDim }}>
+                {tm.wpIdx??'—'}<span style={{ font:'400 11px Space Mono', color:T.textDim }}> / {tm.wpTotal??'—'}</span>
+              </span>
+            </div>
+            <Row label="Distance" value={fmt0(tm.wpDist)} unit="m" />
+            <Row label="Bearing"  value={tm.wpBear!=null?pad3(tm.wpBear):null} unit="°" />
+          </Card>
+          <Card>
+            <SH label="Mission Progress" />
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+              <span style={{ font:'400 11px DM Sans', color:T.textDim }}>Complete</span>
+              <span style={{ font:'bold 14px Space Mono', color:tm.missionPct!=null?T.textBright:T.textDim }}>
+                {tm.missionPct != null ? `${tm.missionPct}%` : '—'}
+              </span>
+            </div>
+            <Bar pct={tm.missionPct} color={T.cyan} h={5} />
+            <div style={{ marginTop:8 }}>
+              <Row label="WPs Done" value={tm.wpIdx!=null ? `${Math.max(0,tm.wpIdx-1)} / ${tm.wpTotal??'—'}` : null} mono={false} />
+            </div>
+          </Card>
+          <Card>
+            <SH label="Active PID Tuning" accent={T.violet} />
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:10, paddingBottom:2, font:'600 10px DM Sans', color:T.textDim }}>
+              <span style={{width:50, textAlign:'right'}}>P</span>
+              <span style={{width:50, textAlign:'right'}}>I</span>
+              <span style={{width:50, textAlign:'right'}}>D</span>
+            </div>
+            <PidRow label="Roll"  vals={tm.pid.roll}  />
+            <PidRow label="Pitch" vals={tm.pid.pitch} />
+            <PidRow label="Yaw"   vals={tm.pid.yaw}   />
+            <CommandTerminal sendCommand={tm.sendCommand} cmdLog={tm.cmdLog} />
+          </Card>
+          <Card>
+            <SH label="System" />
+            <Row label="Arm Status" value={!tm.connected ? 'ARM STATUS' : tm.armed ? 'ARMED' : 'DISARMED'} mono={false} warn={tm.connected && tm.armed} />
+            <Row label="Mode"        value={tm.mode}                                    mono={false} />
+            <Row label="Failsafe"    value={tm.connected?(tm.failsafe?'ACTIVE':'OK'):null} mono={false} warn={tm.failsafe} />
+            <Row label="Battery"     value={fmt2(tm.vbat)}                              unit="V"   warn={batWarn} crit={batCrit} />
+            <Row label="Capacity"    value={tm.batPct!=null?`${Math.round(tm.batPct)}%`:null} warn={batWarn} crit={batCrit} />
+            <Row label="RSSI"        value={tm.rssi!=null?tm.rssi.toFixed(0):null}      unit="dBm" warn={linkWarn} />
+            <Row label="SNR"         value={fmt1(tm.snr)}                               unit="dB"  warn={tm.snr!=null&&tm.snr<5} />
+            <Row label="Packets RX"  value={tm.connected?tm.pktCount.toLocaleString():null} />
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

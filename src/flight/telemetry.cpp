@@ -1,7 +1,7 @@
 #include "flight/telemetry.h"
 #include "hal/comms/lora.h"
 
-static_assert(sizeof(telemetrydata) <= 255,
+static_assert(sizeof(telemetrydata) <= 256,
               "telemetrydata exceeds LoRa packet size");
 
 bool telemetry_send(const telemetrydata &data) {

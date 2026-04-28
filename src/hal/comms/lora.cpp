@@ -32,6 +32,10 @@ void deselect_sd() {
   digitalWrite(SD_CS, HIGH);
 }
 
+void enter_receive_mode() {
+  LoRa.receive();
+}
+
 }  // namespace
 
 bool lora_init() {
@@ -74,8 +78,10 @@ bool lora_init() {
     return false;
   }
 
+  LoRa.setSignalBandwidth(250E3);
   LoRa.setSpreadingFactor(7);
   LoRa.setSyncWord(SYNC_WORD);
+  enter_receive_mode();
   SPIBus_Unlock();
   give_lora_lock();
   g_lora_ready = true;
@@ -98,6 +104,9 @@ bool lora_send(const uint8_t *data, size_t length) {
   const size_t bytes_written =
       (begin_result == 1) ? LoRa.write(data, length) : 0;
   const int end_result = (begin_result == 1) ? LoRa.endPacket() : 0;
+  if (begin_result == 1 && end_result == 1) {
+    enter_receive_mode();
+  }
 
   SPIBus_Unlock();
   give_lora_lock();
@@ -140,7 +149,13 @@ size_t lora_receive(uint8_t *buffer, size_t max_length) {
     (void)LoRa.read();
   }
 
+  enter_receive_mode();
+
   SPIBus_Unlock();
   give_lora_lock();
   return bytes_read;
+}
+
+bool lora_is_ready() {
+  return g_lora_ready;
 }

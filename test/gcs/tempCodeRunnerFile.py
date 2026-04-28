@@ -1,0 +1,1 @@
+python gcs_bridge.py --port COM5 --baud 115200 --ws-port 8765

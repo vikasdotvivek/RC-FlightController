@@ -181,7 +181,8 @@ bool parse_gga_sentence(char *sentence, GPSData &data) {
     int fix_quality = 0;
     parse_int_field(fields[6], fix_quality);
     data.fix_quality = fix_quality;
-    data.lock_acquired = (fix_quality == 1 || fix_quality == 2);
+    // 0=no fix, 1=GPS SPS, 2=DGPS, 3=PPS, 4=RTK fixed, 5=Float RTK, 6=dead reckoning
+    data.lock_acquired = (fix_quality >= 1 && fix_quality <= 3);
 
     int satellites = 0;
     parse_int_field(fields[7], satellites);

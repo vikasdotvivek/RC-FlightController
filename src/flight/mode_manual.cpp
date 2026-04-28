@@ -18,10 +18,10 @@ void mode_manual_run(){
         return;
     }
 
-    float desired_throttle = rc_data.throttle_pwm-1000.0f; //convert to 0-1000 range
-    float desired_roll = rc_data.aileron_pwm - 1500.0f; //convert to -500 to 500 range
-    float desired_pitch = rc_data.elevator_pwm - 1500.0f; 
-    float desired_yaw = rc_data.rudder_pwm - 1500.0f; 
+    float desired_throttle = get_des_throttle();                   // 0-100 percent, honors ESC calibration
+    float desired_roll  = (float)rc_data.aileron_pwm  - 1500.0f;   // us of servo offset
+    float desired_pitch = (float)rc_data.elevator_pwm - 1500.0f;
+    float desired_yaw   = (float)rc_data.rudder_pwm   - 1500.0f;
 
     motormixer_compute(desired_throttle, desired_roll, desired_pitch, desired_yaw);
 }
