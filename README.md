@@ -17,7 +17,7 @@ The current codebase is functional as a firmware skeleton with working sensor in
 | Area | Status | Notes |
 | --- | --- | --- |
 | Board support | Implemented | `adafruit_feather_esp32_v2` via PlatformIO |
-| IMU | Implemented | ICM-20948 over shared I2C, complementary filter for roll/pitch/yaw (tilt-compensated magnetometer fusion), gyro/level/magnetometer calibration helpers |
+| IMU | Implemented | BNO085 over shared I2C, complementary filter for roll/pitch/yaw (tilt-compensated magnetometer fusion), gyro/level/magnetometer calibration helpers |
 | Barometer | Implemented | BMP3XX over I2C |
 | GPS | Implemented | UART2 parser for GGA and RMC sentences |
 | Waypoint navigation | Implemented | Haversine distance, bearing, leg and mission progress |
@@ -97,7 +97,7 @@ The source of truth for project pin assignments is [`include/config.h`](include/
 
 | Subsystem | Interface | Pins | Notes |
 | --- | --- | --- | --- |
-| IMU (ICM-20948) | I2C | `SDA=22`, `SCL=20` | Shared sensor bus, explicit `Wire.begin(22, 20)` and `400 kHz` bus clock |
+| IMU (BNO085) | I2C | `SDA=22`, `SCL=20` | Shared sensor bus, explicit `Wire.begin(22, 20)` and `400 kHz` bus clock |
 | Barometer (BMP3XX) | I2C | `SDA=22`, `SCL=20` | Shares the same mutex-protected sensor bus as the IMU |
 | GPS | UART2 | `TX=8`, `RX=7` | Configured for `115200` baud |
 | LoRa radio | SPI | `SCK=5`, `MOSI=19`, `MISO=21` | External SX127x-style radio expected |
@@ -151,7 +151,7 @@ The main runtime lives in [`src/main.cpp`](src/main.cpp). The default Arduino `l
 
 | Task | Period | Purpose |
 | --- | --- | --- |
-| `TaskIMURead` | `10 ms` | Reads ICM-20948 and updates filtered roll/pitch/yaw |
+| `TaskIMURead` | `10 ms` | Reads BNO085 and updates filtered roll/pitch/yaw |
 | `TaskBarometerRead` | `50 ms` | Reads barometer pressure and altitude |
 | `TaskGPSRead` | `50 ms` | Parses incoming GPS NMEA stream and updates navigation |
 | `TaskFlightControl` | `100 ms` | Reads RC input, selects flight mode, runs active mode |
@@ -214,7 +214,7 @@ Current behavior:
 
 Current IMU driver:
 
-- Sensor: ICM-20948
+- Sensor: BNO085
 - Bus: shared I2C via `sensor_bus`
 - Accelerometer range: `8G`
 - Gyro range: `500 deg/s`
@@ -644,13 +644,13 @@ Known limitations:
 
 ## Quick Start Checklist
 
-1. Wire the Feather ESP32 V2, ICM-20948, BMP3XX, GPS, LoRa radio, ESC, and servos according to the tables above.
+1. Wire the Feather ESP32 V2, BNO085, BMP3XX, GPS, LoRa radio, ESC, and servos according to the tables above.
 2. If you want a simple ground receiver, flash [`test/arduino_lora_receiver/arduino_lora_receiver.ino`](test/arduino_lora_receiver/arduino_lora_receiver.ino) to the ESP32-WROOM DevKit and wire its LoRa module to `SCK=18`, `MISO=19`, `MOSI=23`, `CS=5`, `RST=14`, `IRQ=2`.
 3. Update `missionwaypoints[]` in `include/config.h`.
 4. Adjust `SEALEVELPRESSURE_HPA`, IMU signs, and any IMU calibration offsets in `include/config.h` for your airframe and location.
 5. Build with `pio run`.
 6. Upload and monitor at `115200`.
-7. Verify ICM-20948 startup, barometer readings, GPS lock, and LoRa telemetry before attempting closed-loop flight.
+7. Verify BNO085 startup, barometer readings, GPS lock, and LoRa telemetry before attempting closed-loop flight.
 
 ## Next Steps / TODO
 - Complete the failsafe logic implementation (RTL/Loiter on link loss)
