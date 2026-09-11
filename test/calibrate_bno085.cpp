@@ -1,10 +1,5 @@
 /**
  * BNO085 Interactive Calibration Utility
- *
- * A guided state-machine utility that safely enables background calibration,
- * guides the user through magnetometer figure-8 tumbling, commands the sensor
- * to burn the offsets to its internal EEPROM, and automatically calculates static
- * Roll/Pitch desk-level offsets for config.h.
  */
 #include <Arduino.h>
 #include "config.h"
@@ -13,14 +8,14 @@
 
 namespace
 {
-    constexpr uint32_t kImuReadPeriodMs = 10; // 100 Hz
-    constexpr uint32_t kPrintPeriodMs = 250;  // 4 Hz print rate
+    constexpr uint32_t kImuReadPeriodMs = 10;
+    constexpr uint32_t kPrintPeriodMs = 250;
+    constexpr uint8_t kRequiredCalibrationAccuracy = 3;
 
     IMUData_raw g_imu_data = {};
     uint32_t g_last_imu_read_ms = 0;
     uint32_t g_last_print_ms = 0;
 
-    // Defines the steps of the interactive calibration wizard
     enum CalibState
     {
         STATE_WAIT_START,
@@ -31,20 +26,19 @@ namespace
         STATE_YAW_PREVIEW,
         STATE_FINISHED
     };
+
     CalibState g_state = STATE_WAIT_START;
     uint32_t g_state_start_ms = 0;
     int g_last_countdown_sec = -1;
     double g_sum_roll = 0.0;
     double g_sum_pitch = 0.0;
     int g_sample_count = 0;
-} // namespace
+}
 
 void setup()
 {
     Serial.begin(115200);
-    while (!Serial)
-    {
-    }
+    while (!Serial) {}
 
     Serial.println("\n============================================");
     Serial.println("   BNO085 CALIBRATION & EEPROM UTILITY      ");
@@ -57,19 +51,23 @@ void setup()
 
     BNO085_Init();
 
-    // Command the BNO085 to actively figure out its biases right now
-    BNO085_EnableBackgroundCalibration();
+    if (!BNO085_EnableBackgroundCalibration())
+    {
+        Serial.println("ERROR: Failed to enable BNO085 background calibration/reports.");
+        Serial.println("Calibration cannot safely continue.");
+        while (true) delay(1000);
+    }
 
-    Serial.println("BNO085 initialized and Background Calibration ENABLED.");
-
-    // Wait briefly to receive the first uncalibrated reports which contain the biases loaded from Flash
+    Serial.println("BNO085 initialized and background calibration enabled.");
     Serial.println("\nReading existing calibration biases from flash...");
-    uint32_t wait_start = millis();
+
+    const uint32_t wait_start = millis();
     while (millis() - wait_start < 1500)
     {
         BNO085_Read(g_imu_data);
         delay(10);
     }
+
     float mx, my, mz, gx, gy, gz;
     BNO085_GetCalibrationBiases(mx, my, mz, gx, gy, gz);
     Serial.println("\n--- EXISTING SENSOR STATE ---");
@@ -80,7 +78,6 @@ void setup()
     Serial.println("-----------------------------\n");
 
     Serial.println("Press ENTER in the serial monitor to begin the calibration sequence...");
-    g_state = STATE_WAIT_START;
 }
 
 void loop()
@@ -94,10 +91,9 @@ void loop()
 
         if (g_state == STATE_LEVEL_RECORD && g_imu_data.healthy)
         {
-            // To calculate the raw level offsets, we add back whatever offset is currently applied
             g_sum_roll += (g_imu_data.roll + IMU_LEVEL_ROLL_OFFSET_DEG);
             g_sum_pitch += (g_imu_data.pitch + IMU_LEVEL_PITCH_OFFSET_DEG);
-            g_sample_count++;
+            ++g_sample_count;
         }
     }
 
@@ -106,8 +102,7 @@ void loop()
     case STATE_WAIT_START:
         if (Serial.available())
         {
-            while (Serial.available())
-                Serial.read(); // Clear input buffer
+            while (Serial.available()) Serial.read();
             g_state = STATE_MAG_PREP;
             g_state_start_ms = now_ms;
             g_last_countdown_sec = -1;
@@ -118,12 +113,11 @@ void loop()
 
     case STATE_MAG_PREP:
     {
-        int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
+        const int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
         if (remain != g_last_countdown_sec)
         {
             g_last_countdown_sec = remain;
-            if (remain > 0)
-                Serial.printf("Starting in %d...\n", remain);
+            if (remain > 0) Serial.printf("Starting in %d...\n", remain);
         }
         if (remain <= 0)
         {
@@ -137,20 +131,45 @@ void loop()
 
     case STATE_MAG_RECORD:
     {
-        int remain = 15 - ((now_ms - g_state_start_ms) / 1000);
+        const int remain = 15 - ((now_ms - g_state_start_ms) / 1000);
         if (remain != g_last_countdown_sec)
         {
             g_last_countdown_sec = remain;
-            uint8_t acc = BNO085_GetCalibrationStatus();
+            const uint8_t accuracy = BNO085_GetCalibrationStatus();
             if (remain > 0)
-                Serial.printf("  Time left: %2ds | Current Accuracy: %d/3\n", remain, acc);
+                Serial.printf("  Time left: %2ds | Current Accuracy: %d/3\n", remain, accuracy);
         }
+
         if (remain <= 0)
         {
-            // Trigger the native EEPROM burn. This takes roughly 1.5 - 2 seconds internally.
-            Serial.println("\nSaving dynamic calibration to BNO085 internal flash...");
-            BNO085_SaveCalibrationToFlash();
-            Serial.println("*** FLASH SAVED ***\n");
+            const uint8_t accuracy = BNO085_GetCalibrationStatus();
+            if (accuracy < kRequiredCalibrationAccuracy)
+            {
+                Serial.printf("\nCalibration accuracy is only %d/3. NOT saving to flash.\n", accuracy);
+                Serial.println("Continue tumbling; another 15-second calibration window is starting.");
+                g_state_start_ms = now_ms;
+                g_last_countdown_sec = -1;
+                break;
+            }
+
+            Serial.println("\nAccuracy is 3/3. Saving dynamic calibration to BNO085 flash...");
+            if (!BNO085_SaveCalibrationToFlash())
+            {
+                Serial.println("ERROR: BNO085 rejected or failed the DCD save command.");
+                Serial.println("Calibration was NOT confirmed saved. Continue tumbling and retrying.");
+                g_state_start_ms = millis();
+                g_last_countdown_sec = -1;
+                break;
+            }
+
+            Serial.println("*** FLASH SAVE COMMAND ACCEPTED ***\n");
+            // Save forces the driver to require a fresh reconnect. Read until fresh again.
+            const uint32_t reconnect_start = millis();
+            while (!g_imu_data.healthy && (millis() - reconnect_start) < 5000)
+            {
+                BNO085_Read(g_imu_data);
+                delay(20);
+            }
 
             g_state = STATE_LEVEL_PREP;
             g_state_start_ms = millis();
@@ -163,12 +182,11 @@ void loop()
 
     case STATE_LEVEL_PREP:
     {
-        int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
+        const int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
         if (remain != g_last_countdown_sec)
         {
             g_last_countdown_sec = remain;
-            if (remain > 0)
-                Serial.printf("Starting in %d...\n", remain);
+            if (remain > 0) Serial.printf("Starting in %d...\n", remain);
         }
         if (remain <= 0)
         {
@@ -185,33 +203,32 @@ void loop()
 
     case STATE_LEVEL_RECORD:
     {
-        int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
+        const int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
         if (remain != g_last_countdown_sec)
         {
             g_last_countdown_sec = remain;
-            if (remain > 0)
-                Serial.printf("  Recording... %ds left\n", remain);
+            if (remain > 0) Serial.printf("  Recording... %ds left\n", remain);
         }
         if (remain <= 0)
         {
             if (g_sample_count > 0)
             {
-                float new_roll_offset = g_sum_roll / g_sample_count;
-                float new_pitch_offset = g_sum_pitch / g_sample_count;
+                const float new_roll_offset = g_sum_roll / g_sample_count;
+                const float new_pitch_offset = g_sum_pitch / g_sample_count;
 
                 Serial.println("\n============================================");
                 Serial.println("         CALIBRATION COMPLETE               ");
                 Serial.println("============================================");
-                Serial.println("BNO085 Mag/Gyro offsets are already burned into its flash memory.");
-                Serial.println("\nFor the Roll/Pitch leveling, copy these lines into include/config.h:");
+                Serial.println("BNO085 Mag/Gyro calibration save was accepted.");
+                Serial.println("\nFor Roll/Pitch leveling, copy these lines into include/config.h:");
                 Serial.printf("constexpr float IMU_LEVEL_ROLL_OFFSET_DEG = %6.2ff;\n", new_roll_offset);
                 Serial.printf("constexpr float IMU_LEVEL_PITCH_OFFSET_DEG = %6.2ff;\n", new_pitch_offset);
                 Serial.println("============================================");
-                Serial.println("\nStreaming raw data for 5 seconds before snapping Yaw to 0...");
+                Serial.println("\nStreaming data for 5 seconds before taring relative Yaw to 0...");
             }
             else
             {
-                Serial.println("\nError: No samples collected during level calibration.");
+                Serial.println("\nError: No fresh IMU samples collected during level calibration.");
             }
 
             g_state = STATE_YAW_PREVIEW;
@@ -223,38 +240,39 @@ void loop()
 
     case STATE_YAW_PREVIEW:
     {
-        int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
+        const int remain = 5 - ((now_ms - g_state_start_ms) / 1000);
 
         if ((now_ms - g_last_print_ms) >= kPrintPeriodMs)
         {
             g_last_print_ms = now_ms;
             if (g_imu_data.healthy)
             {
-                uint8_t accuracy = BNO085_GetCalibrationStatus();
-                Serial.printf("Acc: %d/3 | Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f\n",
-                              accuracy, g_imu_data.roll, g_imu_data.pitch, g_imu_data.yaw);
+                const uint8_t accuracy = BNO085_GetCalibrationStatus();
+                Serial.printf("Acc: %d/3 | Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f | Heading: %6.2f\n",
+                              accuracy, g_imu_data.roll, g_imu_data.pitch,
+                              g_imu_data.yaw, g_imu_data.heading);
             }
         }
 
         if (remain <= 0)
         {
             BNO085_TareYaw();
-            Serial.println("\n*** YAW SNAPPED TO 0 DEGREES ***");
-            Serial.println("\nNow streaming live data (Press 't' to tare Yaw again).");
+            Serial.println("\n*** RELATIVE YAW SNAPPED TO 0 DEGREES ***");
+            Serial.println("Absolute heading remains unchanged for navigation.");
+            Serial.println("Press 't' to tare relative Yaw again.");
             g_state = STATE_FINISHED;
         }
         break;
     }
 
     case STATE_FINISHED:
-    {
         if (Serial.available())
         {
-            char c = Serial.read();
+            const char c = Serial.read();
             if (c == 't' || c == 'T')
             {
                 BNO085_TareYaw();
-                Serial.println("\n*** YAW TARED TO 0 DEGREES ***\n");
+                Serial.println("\n*** RELATIVE YAW TARED TO 0 DEGREES ***\n");
             }
         }
 
@@ -263,12 +281,12 @@ void loop()
             g_last_print_ms = now_ms;
             if (g_imu_data.healthy)
             {
-                uint8_t accuracy = BNO085_GetCalibrationStatus();
-                Serial.printf("Acc: %d/3 | Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f\n",
-                              accuracy, g_imu_data.roll, g_imu_data.pitch, g_imu_data.yaw);
+                const uint8_t accuracy = BNO085_GetCalibrationStatus();
+                Serial.printf("Acc: %d/3 | Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f | Heading: %6.2f\n",
+                              accuracy, g_imu_data.roll, g_imu_data.pitch,
+                              g_imu_data.yaw, g_imu_data.heading);
             }
         }
         break;
-    }
     }
 }
