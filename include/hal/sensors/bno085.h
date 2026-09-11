@@ -6,7 +6,11 @@
  */
 #pragma once
 
+#include <stdint.h>
 #include "datatypes.h"
+
+// Rotation vector is requested at 100 Hz. More than 200 ms without one is stale.
+constexpr uint32_t BNO085_DATA_TIMEOUT_MS = 200;
 
 void BNO085_Init();
 void BNO085_Read(IMUData_raw &data);
