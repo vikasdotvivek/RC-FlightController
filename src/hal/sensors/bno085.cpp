@@ -1,9 +1,8 @@
 /**
  * BNO085 Hardware Abstraction Layer
  *
- * Wraps the Adafruit BNO08x library and the native Hillcrest SH-2 C-API to communicate
- * with the BNO085 over a shared I2C bus. Extracts quaternions, converts them to Euler
- * angles, keeps an absolute heading for navigation, and exposes a separately tared yaw.
+ * Wraps the Adafruit BNO08x library and Hillcrest SH-2 C API on the shared I2C bus.
+ * Provides fresh fused attitude, absolute heading for navigation, and relative/tared yaw.
  */
 #include "hal/sensors/bno085.h"
 #include <Wire.h>
@@ -18,6 +17,7 @@ namespace
     Adafruit_BNO08x bno08x;
     bool g_bno_ready = false;
     uint32_t g_last_init_attempt_ms = 0;
+    uint32_t g_report_start_ms = 0;
     uint32_t g_last_rotation_event_ms = 0;
     uint8_t g_last_calibration_status = 0;
     float g_yaw_tare_offset = 0.0f;
@@ -35,19 +35,15 @@ namespace
 
     float Wrap180(float angle_deg)
     {
-        while (angle_deg > 180.0f)
-            angle_deg -= 360.0f;
-        while (angle_deg < -180.0f)
-            angle_deg += 360.0f;
+        while (angle_deg > 180.0f) angle_deg -= 360.0f;
+        while (angle_deg < -180.0f) angle_deg += 360.0f;
         return angle_deg;
     }
 
     float Normalize360(float angle_deg)
     {
-        while (angle_deg < 0.0f)
-            angle_deg += 360.0f;
-        while (angle_deg >= 360.0f)
-            angle_deg -= 360.0f;
+        while (angle_deg < 0.0f) angle_deg += 360.0f;
+        while (angle_deg >= 360.0f) angle_deg -= 360.0f;
         return angle_deg;
     }
 
@@ -70,6 +66,7 @@ namespace
     void MarkBNOUnavailable()
     {
         g_bno_ready = false;
+        g_report_start_ms = 0;
         g_last_rotation_event_ms = 0;
     }
 
@@ -95,28 +92,20 @@ namespace
         {
             reports_ok = EnableCoreReportsLocked();
             if (reports_ok && g_background_calibration_enabled)
-            {
                 reports_ok = EnableCalibrationReportsLocked();
-            }
         }
 
         SensorBus_Unlock();
 
         const bool ready = begin_ok && reports_ok;
         if (ready && !g_bno_ready && SENSOR_STATUS_LOGGING_ENABLED)
-        {
             Serial.println("BNO085 available and reports enabled.");
-        }
         else if (!ready && SENSOR_STATUS_LOGGING_ENABLED)
-        {
             Serial.println("BNO085 unavailable or report configuration failed.");
-        }
 
         g_bno_ready = ready;
-        if (!ready)
-        {
-            g_last_rotation_event_ms = 0;
-        }
+        g_last_rotation_event_ms = 0;
+        g_report_start_ms = ready ? millis() : 0;
         return ready;
     }
 } // namespace
@@ -146,9 +135,7 @@ void BNO085_Read(IMUData_raw &data)
     {
         bool reports_ok = EnableCoreReportsLocked();
         if (reports_ok && g_background_calibration_enabled)
-        {
             reports_ok = EnableCalibrationReportsLocked();
-        }
 
         if (!reports_ok)
         {
@@ -159,8 +146,8 @@ void BNO085_Read(IMUData_raw &data)
             return;
         }
 
-        // A reset invalidates our freshness timestamp until a new rotation vector arrives.
         g_last_rotation_event_ms = 0;
+        g_report_start_ms = millis();
     }
 
     sh2_SensorValue_t sensorValue;
@@ -242,11 +229,21 @@ void BNO085_Read(IMUData_raw &data)
     SensorBus_Unlock();
 
     const uint32_t now_ms = millis();
-    const bool attitude_fresh =
-        (g_last_rotation_event_ms != 0) &&
-        ((now_ms - g_last_rotation_event_ms) <= BNO085_DATA_TIMEOUT_MS);
+    if (g_last_rotation_event_ms == 0)
+    {
+        // Report delivery can lag initialization briefly. Do not force a reconnect until
+        // the report stream has had a full freshness window to produce its first attitude.
+        if (g_report_start_ms != 0 &&
+            (now_ms - g_report_start_ms) > BNO085_DATA_TIMEOUT_MS)
+        {
+            MarkBNOUnavailable();
+        }
+        data = g_cached_data;
+        data.healthy = false;
+        return;
+    }
 
-    if (!attitude_fresh)
+    if ((now_ms - g_last_rotation_event_ms) > BNO085_DATA_TIMEOUT_MS)
     {
         MarkBNOUnavailable();
         data = g_cached_data;
@@ -286,9 +283,8 @@ bool BNO085_SaveCalibrationToFlash()
     const bool save_ok = (sh2_saveDcdNow() == SH2_OK);
     if (save_ok)
     {
-        // Pump the event loop so the queued SH-2 command is actually transmitted.
         sh2_SensorValue_t dummy;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 3; ++i)
         {
             bno08x.getSensorEvent(&dummy);
             delay(5);
@@ -300,8 +296,6 @@ bool BNO085_SaveCalibrationToFlash()
     if (!save_ok)
         return false;
 
-    // The sensor may briefly stop responding while committing DCD. Force a fresh
-    // initialization and fresh rotation vector before declaring the IMU healthy again.
     delay(2000);
     MarkBNOUnavailable();
     return true;
@@ -314,7 +308,7 @@ uint8_t BNO085_GetCalibrationStatus()
 
 void BNO085_TareYaw()
 {
-    // Adjust only the relative yaw reference. Absolute heading remains untouched.
+    // Only relative yaw is tared. Absolute heading stays untouched for navigation.
     g_yaw_tare_offset += g_cached_data.yaw;
     g_cached_data.yaw = 0.0f;
 }
