@@ -13,18 +13,17 @@ extern PIDController roll_pid;
 extern PIDController pitch_pid;
 extern PIDController altitude_pid;
 extern PIDController headingerror_pid;
-//extern PIDController yaw_pid;
 
 extern IMUData_filtered imu_data;
+extern IMUData_raw currentIMU;
 extern BarometerData baro_data;
 extern GPSData gps_data;
 
 void mode_waypoint_init() {
     roll_pid.PIDreset();
-    pitch_pid.PIDreset(); 
-    altitude_pid.PIDreset();  
-    headingerror_pid.PIDreset();  
-    //yaw_pid.PIDreset();
+    pitch_pid.PIDreset();
+    altitude_pid.PIDreset();
+    headingerror_pid.PIDreset();
 }
 
 void mode_waypoint_run(){
@@ -44,23 +43,22 @@ void mode_waypoint_run(){
     const float target_altitude = navigation.get_target_altitude();
     const float target_altitude_agl = target_altitude;
 
-
-    // Heading source selected by WAYPOINT_USE_IMU_YAW in config.h.
-    const float actual_heading = WAYPOINT_USE_IMU_YAW ? imu_data.yaw : gps_data.heading;
+    // IMU heading is absolute magnetic heading from the BNO085 and is deliberately
+    // separate from software-tared relative yaw. GPS heading is course over ground.
+    const float actual_heading = WAYPOINT_USE_IMU_YAW ? currentIMU.heading : gps_data.heading;
     const float actual_altitude_msl = baro_data.healthy ? baro_data.altitude : gps_data.altitude;
     const float actual_altitude_agl = calc_AGL(actual_altitude_msl);
 
-    // GPS course-over-ground is unreliable below WAYPOINT_MIN_GROUND_SPEED_MPS;
-    // IMU yaw is valid at any speed.
-    const bool heading_valid =
-        WAYPOINT_USE_IMU_YAW || (gps_data.speed >= WAYPOINT_MIN_GROUND_SPEED_MPS);
+    const bool heading_valid = WAYPOINT_USE_IMU_YAW
+        ? currentIMU.healthy
+        : (gps_data.lock_acquired && gps_data.speed >= WAYPOINT_MIN_GROUND_SPEED_MPS);
 
     float desired_roll = 0.0f;
     if (heading_valid) {
         const float heading_error = math::wrap_heading_error(target_heading - actual_heading);
         const float desired_heading_error = 0.0f;
         desired_roll = headingerror_pid.compute(heading_error, desired_heading_error, flight_control_dt_seconds);
-        desired_roll= -desired_roll;
+        desired_roll = -desired_roll;
     }
     desired_roll = math::clamp_value(desired_roll, -max_roll_angle, max_roll_angle);
 
