@@ -1,3 +1,8 @@
+> [!WARNING]
+> **TEST BRANCH — DO NOT MERGE INTO `main` YET**
+>
+> The `main_test` branch contains unverified sensor and navigation fixes. It must be built, bench-tested, hardware-validated, and flight-tested as appropriate before any changes are merged into `main`.
+
 # RC-FlightController
 
 Fixed-wing flight controller firmware for the Adafruit Feather ESP32 V2, built with Arduino-on-ESP32 and scheduled with FreeRTOS.
