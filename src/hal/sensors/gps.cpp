@@ -16,16 +16,54 @@ HardwareSerial gps_serial(GPS_UART_NUM);
 char gps_sentence_buffer[GPS_SENTENCE_BUFFER_SIZE] = {};
 size_t gps_sentence_length = 0;
 constexpr float kKnotsToMetersPerSecond = 0.514444f;
+constexpr uint32_t kGpsDataTimeoutMs = 1500;
+constexpr uint32_t kGpsFixTimeoutMs = 2000;
+uint32_t g_last_valid_sentence_ms = 0;
+uint32_t g_last_position_fix_ms = 0;
 
 void clear_fix_data(GPSData &data) {
     data.latitude = 0.0;
     data.longitude = 0.0;
     data.altitude = 0.0f;
+    data.speed = 0.0f;
+    data.heading = 0.0f;
     data.raw_coordinates.latitude[0] = '\0';
     data.raw_coordinates.latitude_dir = '\0';
     data.raw_coordinates.longitude[0] = '\0';
     data.raw_coordinates.longitude_dir = '\0';
     data.lock_acquired = false;
+}
+
+int hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+}
+
+bool validate_nmea_checksum(const char *sentence) {
+    if (sentence == nullptr || sentence[0] != '$') {
+        return false;
+    }
+
+    const char *asterisk = std::strchr(sentence, '*');
+    if (asterisk == nullptr || asterisk[1] == '\0' || asterisk[2] == '\0') {
+        return false;
+    }
+
+    uint8_t checksum = 0;
+    for (const char *cursor = sentence + 1; cursor < asterisk; ++cursor) {
+        checksum ^= static_cast<uint8_t>(*cursor);
+    }
+
+    const int high = hex_value(asterisk[1]);
+    const int low = hex_value(asterisk[2]);
+    if (high < 0 || low < 0) {
+        return false;
+    }
+
+    const uint8_t expected = static_cast<uint8_t>((high << 4) | low);
+    return checksum == expected;
 }
 
 size_t split_nmea_fields(char *sentence, char *fields[], size_t max_fields) {
@@ -119,6 +157,10 @@ bool parse_local_time(const char *field, GPSLocalTime &local_time) {
     const int minutes = ((field[2] - '0') * 10) + (field[3] - '0');
     const int seconds = ((field[4] - '0') * 10) + (field[5] - '0');
 
+    if (utc_hour > 23 || minutes > 59 || seconds > 60) {
+        return false;
+    }
+
     int local_hour = utc_hour + GPS_TIME_ZONE_OFFSET;
     while (local_hour < 0) {
         local_hour += 24;
@@ -147,6 +189,10 @@ bool parse_coordinate(const char *field, char direction, double &coordinate) {
 
     const double degrees = std::floor(nmea_coordinate / 100.0);
     const double minutes = nmea_coordinate - (degrees * 100.0);
+    if (minutes < 0.0 || minutes >= 60.0) {
+        return false;
+    }
+
     coordinate = degrees + (minutes / 60.0);
 
     const char normalized_direction =
@@ -181,8 +227,9 @@ bool parse_gga_sentence(char *sentence, GPSData &data) {
     int fix_quality = 0;
     parse_int_field(fields[6], fix_quality);
     data.fix_quality = fix_quality;
-    // 0=no fix, 1=GPS SPS, 2=DGPS, 3=PPS, 4=RTK fixed, 5=Float RTK, 6=dead reckoning
-    data.lock_acquired = (fix_quality >= 1 && fix_quality <= 3);
+    // 0=no fix, 1=GPS SPS, 2=DGPS, 3=PPS, 4=RTK fixed, 5=RTK float, 6=dead reckoning.
+    // Accept 1-5 as externally-positioned fixes. Dead reckoning is not treated as GPS lock.
+    data.lock_acquired = (fix_quality >= 1 && fix_quality <= 5);
 
     int satellites = 0;
     parse_int_field(fields[7], satellites);
@@ -208,14 +255,23 @@ bool parse_gga_sentence(char *sentence, GPSData &data) {
         return true;
     }
 
+    float altitude = 0.0f;
+    if (!parse_float_field(fields[9], altitude)) {
+        clear_fix_data(data);
+        data.fix_quality = fix_quality;
+        data.satellites = satellites;
+        return true;
+    }
+
     data.latitude = latitude;
     data.longitude = longitude;
-    parse_float_field(fields[9], data.altitude);
+    data.altitude = altitude;
     copy_coordinate_field(data.raw_coordinates.latitude, sizeof(data.raw_coordinates.latitude), fields[2]);
     copy_coordinate_field(data.raw_coordinates.longitude, sizeof(data.raw_coordinates.longitude), fields[4]);
     data.raw_coordinates.latitude_dir = latitude_direction;
     data.raw_coordinates.longitude_dir = longitude_direction;
     data.lock_acquired = true;
+    g_last_position_fix_ms = millis();
 
     return true;
 }
@@ -241,8 +297,12 @@ bool parse_rmc_sentence(char *sentence, GPSData &data) {
 
     float speed_knots = 0.0f;
     float track_heading = 0.0f;
-    parse_float_field(fields[7], speed_knots);
-    parse_float_field(fields[8], track_heading);
+    if (!parse_float_field(fields[7], speed_knots)) {
+        speed_knots = 0.0f;
+    }
+    if (!parse_float_field(fields[8], track_heading)) {
+        track_heading = 0.0f;
+    }
 
     data.speed = speed_knots * kKnotsToMetersPerSecond;
     data.heading = track_heading;
@@ -254,12 +314,24 @@ bool process_incoming_byte(char incoming_byte, GPSData &data) {
         return false;
     }
 
+    // Resynchronize cleanly on a new NMEA sentence even if noise/overflow occurred.
+    if (incoming_byte == '$') {
+        gps_sentence_length = 0;
+        gps_sentence_buffer[gps_sentence_length++] = incoming_byte;
+        return false;
+    }
+
     if (incoming_byte == '\n') {
         if (gps_sentence_length == 0) {
             return false;
         }
 
         gps_sentence_buffer[gps_sentence_length] = '\0';
+        if (!validate_nmea_checksum(gps_sentence_buffer)) {
+            gps_sentence_length = 0;
+            return false;
+        }
+
         bool parsed_sentence = false;
         if (parse_gga_sentence(gps_sentence_buffer, data)) {
             parsed_sentence = true;
@@ -270,8 +342,16 @@ bool process_incoming_byte(char incoming_byte, GPSData &data) {
             parsed_sentence = true;
         }
 
+        if (parsed_sentence) {
+            g_last_valid_sentence_ms = millis();
+        }
+
         gps_sentence_length = 0;
         return parsed_sentence;
+    }
+
+    if (gps_sentence_length == 0) {
+        return false;
     }
 
     if (gps_sentence_length >= (GPS_SENTENCE_BUFFER_SIZE - 1)) {
@@ -283,6 +363,29 @@ bool process_incoming_byte(char incoming_byte, GPSData &data) {
     return false;
 }
 
+void expire_stale_gps_data(GPSData &data) {
+    const uint32_t now_ms = millis();
+
+    if (g_last_valid_sentence_ms == 0 ||
+        (now_ms - g_last_valid_sentence_ms) > kGpsDataTimeoutMs) {
+        clear_fix_data(data);
+        data.healthy = false;
+        data.local_time.valid = false;
+        return;
+    }
+
+    data.healthy = true;
+
+    if (g_last_position_fix_ms == 0 ||
+        (now_ms - g_last_position_fix_ms) > kGpsFixTimeoutMs) {
+        const int last_fix_quality = data.fix_quality;
+        const int last_satellites = data.satellites;
+        clear_fix_data(data);
+        data.fix_quality = last_fix_quality;
+        data.satellites = last_satellites;
+    }
+}
+
 } // namespace
 
 void GPS_Init() {
@@ -290,6 +393,8 @@ void GPS_Init() {
 
     gps_sentence_length = 0;
     gps_sentence_buffer[0] = '\0';
+    g_last_valid_sentence_ms = 0;
+    g_last_position_fix_ms = 0;
 
     if (GPS_DEBUG_OUTPUT_ENABLED) {
         Serial.printf("Initializing GPS on UART%d at %lu baud...\n", GPS_UART_NUM, GPS_BAUD_RATE);
@@ -298,15 +403,16 @@ void GPS_Init() {
 }
 
 bool GPS_Read(GPSData &data) {
-    bool parsed_gga = false;
+    bool parsed_any = false;
 
     while (gps_serial.available() > 0) {
         if (process_incoming_byte(static_cast<char>(gps_serial.read()), data)) {
-            parsed_gga = true;
+            parsed_any = true;
         }
     }
 
-    return parsed_gga;
+    expire_stale_gps_data(data);
+    return parsed_any;
 }
 
 void GPS_PrintStatus(Stream &stream, const GPSData &data) {
