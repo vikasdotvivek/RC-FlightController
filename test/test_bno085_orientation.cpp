@@ -5,20 +5,18 @@
 
 namespace
 {
-    constexpr uint32_t kImuReadPeriodMs = 10; // 100 Hz
-    constexpr uint32_t kPrintPeriodMs = 20;  // 5 Hz print rate
+    constexpr uint32_t kImuReadPeriodMs = 10;  // 100 Hz
+    constexpr uint32_t kPrintPeriodMs = 200;   // 5 Hz
 
     IMUData_raw g_imu_data = {};
     uint32_t g_last_imu_read_ms = 0;
     uint32_t g_last_print_ms = 0;
-} // namespace
+}
 
 void setup()
 {
     Serial.begin(115200);
-    while (!Serial)
-    {
-    }
+    while (!Serial) {}
 
     Serial.println("\n============================================");
     Serial.println("   BNO085 RAW + ORIENTATION TEST            ");
@@ -52,18 +50,18 @@ void loop()
 
         if (g_imu_data.healthy)
         {
-            Serial.printf("Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f || "
+            Serial.printf("Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f | Heading: %6.2f || "
                           "Accel [X: %6.2f Y: %6.2f Z: %6.2f] | "
                           "Gyro [X: %6.2f Y: %6.2f Z: %6.2f] | "
                           "Mag [X: %6.2f Y: %6.2f Z: %6.2f]\n",
-                          g_imu_data.roll, g_imu_data.pitch, g_imu_data.yaw,
+                          g_imu_data.roll, g_imu_data.pitch, g_imu_data.yaw, g_imu_data.heading,
                           g_imu_data.accel_x, g_imu_data.accel_y, g_imu_data.accel_z,
                           g_imu_data.gyro_x, g_imu_data.gyro_y, g_imu_data.gyro_z,
                           g_imu_data.mag_x, g_imu_data.mag_y, g_imu_data.mag_z);
         }
         else
         {
-            Serial.println("BNO085 data not healthy or sensor disconnected.");
+            Serial.println("BNO085 data stale/unhealthy or sensor disconnected.");
         }
     }
 }
