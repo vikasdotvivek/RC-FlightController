@@ -16,6 +16,7 @@ struct IMUData_filtered{
     float roll;
     float pitch;
     float yaw;
+    float heading;
 };
 
 struct GPSLocalTime {
