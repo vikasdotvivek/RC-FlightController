@@ -8,7 +8,8 @@ struct IMUData_raw {
     float roll;
     float pitch;
     float yaw;
-    bool healthy; // True if sensor is connected and reading
+    float heading; // Absolute 0-360 heading for navigation; yaw may be software-tared/relative
+    bool healthy; // True if sensor is connected and reading fresh attitude data
 };
 
 struct IMUData_filtered{
