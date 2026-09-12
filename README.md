@@ -12,6 +12,46 @@ This project combines:
 
 The current codebase is functional as a firmware skeleton with working sensor ingestion, navigation math, telemetry transmission, and mode scheduling. A few subsystems are still placeholders, especially the Spektrum RX backend, airspeed sensing, and failsafe logic.
 
+## Flight Testing, Ground Station & Hardware
+
+<table>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/readme/gcs-live-flight-dashboard.jpg" width="100%"><br>
+<strong>Ground Control Station — Full Telemetry Dashboard</strong>
+</td>
+<td width="50%" align="center">
+<img src="docs/images/readme/gcs-altitude-telemetry.jpg" width="100%"><br>
+<strong>Live GCS Telemetry — Altitude and Attitude Tracking</strong>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/readme/gcs-pid-tuning.jpg" width="100%"><br>
+<strong>Over-the-Air PID Tuning and ACK Verification</strong>
+</td>
+<td width="50%" align="center">
+<img src="docs/images/readme/altitude-hold-flight-analysis.jpg" width="100%"><br>
+<strong>Flight Log Analysis — Altitude Hold at 100 m and 50 m</strong>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/readme/radian-airframe-field-test.jpg" width="100%"><br>
+<strong>Radian Airframe — Field Test Platform</strong>
+</td>
+<td width="50%" align="center">
+<img src="docs/images/readme/mobile-ground-station.jpg" width="100%"><br>
+<strong>Mobile Ground Station and Integrated Avionics Test</strong>
+</td>
+</tr>
+</table>
+
+<p align="center">
+<img src="docs/images/readme/flight-controller-wiring-schematic.jpg" width="900"><br>
+<strong>Flight Controller System Wiring Schematic</strong>
+</p>
+
 ## At A Glance
 
 | Area | Status | Notes |
@@ -57,7 +97,7 @@ The ground station receiver accepts the following text commands over serial (or 
 - `pid pitch <kp> <ki> <kd>`: Update Pitch PID gains.
 - `pid yaw <kp> <ki> <kd>`: Update Yaw PID gains.
 - `pid altitude <kp> <ki> <kd>` or `pid alt <kp> <ki> <kd>`: Update Altitude hold PID gains.
-- `pid all <rkp> <rki> <rkd> <pkp> <pki> <pkd> <ykp> <yki> <ykd> [<akp> <aki> <akd>]`: Update multiple axes simultaneously.
+- `pid all <rkp> <ri> <rkd> <pkp> <pki> <pkd> <ykp> <yki> <ykd> [<akp> <aki> <akd>]`: Update multiple axes simultaneously.
 
 *Example:* `pid roll 15.5 0.1 0.05`
 
