@@ -1,0 +1,424 @@
+{
+  "generator": "repository-static-triage",
+  "version": "1.0",
+  "repository": "vikasdotvivek/RC-FlightController",
+  "revision": "37e5d48736f138d9cc85a341d5959c1308f7b6f2",
+  "tracked_files": 77,
+  "scanned": [
+    {
+      "path": "include/config.h",
+      "lines": 325,
+      "bytes": 12079
+    },
+    {
+      "path": "include/datatypes.h",
+      "lines": 151,
+      "bytes": 3087
+    },
+    {
+      "path": "include/errors.h",
+      "lines": 0,
+      "bytes": 0
+    },
+    {
+      "path": "include/flight/arming.h",
+      "lines": 5,
+      "bytes": 73
+    },
+    {
+      "path": "include/flight/failsafe.h",
+      "lines": 9,
+      "bytes": 186
+    },
+    {
+      "path": "include/flight/flightmodes.h",
+      "lines": 25,
+      "bytes": 368
+    },
+    {
+      "path": "include/flight/gcs_commands.h",
+      "lines": 15,
+      "bytes": 722
+    },
+    {
+      "path": "include/flight/home.h",
+      "lines": 12,
+      "bytes": 269
+    },
+    {
+      "path": "include/flight/motormixer.h",
+      "lines": 5,
+      "bytes": 210
+    },
+    {
+      "path": "include/flight/telemetry.h",
+      "lines": 4,
+      "bytes": 85
+    },
+    {
+      "path": "include/hal/actuators/pwm_out.h",
+      "lines": 20,
+      "bytes": 513
+    },
+    {
+      "path": "include/hal/comms/lora.h",
+      "lines": 10,
+      "bytes": 241
+    },
+    {
+      "path": "include/hal/comms/lora_protocol.h",
+      "lines": 83,
+      "bytes": 2129
+    },
+    {
+      "path": "include/hal/comms/rx_spektrum.h",
+      "lines": 18,
+      "bytes": 375
+    },
+    {
+      "path": "include/hal/comms/spi_bus.h",
+      "lines": 7,
+      "bytes": 148
+    },
+    {
+      "path": "include/hal/sensors/airspeed.h",
+      "lines": 7,
+      "bytes": 120
+    },
+    {
+      "path": "include/hal/sensors/baro.h",
+      "lines": 7,
+      "bytes": 104
+    },
+    {
+      "path": "include/hal/sensors/bno085.h",
+      "lines": 38,
+      "bytes": 1788
+    },
+    {
+      "path": "include/hal/sensors/gps.h",
+      "lines": 11,
+      "bytes": 192
+    },
+    {
+      "path": "include/hal/sensors/imu.h",
+      "lines": 12,
+      "bytes": 565
+    },
+    {
+      "path": "include/hal/sensors/sensor_bus.h",
+      "lines": 7,
+      "bytes": 157
+    },
+    {
+      "path": "include/logging/sd_logger.h",
+      "lines": 39,
+      "bytes": 1422
+    },
+    {
+      "path": "include/math/ahrs.h",
+      "lines": 18,
+      "bytes": 287
+    },
+    {
+      "path": "include/math/pid.h",
+      "lines": 25,
+      "bytes": 661
+    },
+    {
+      "path": "include/math/utils.h",
+      "lines": 8,
+      "bytes": 159
+    },
+    {
+      "path": "include/nav/waypoint.h",
+      "lines": 39,
+      "bytes": 879
+    },
+    {
+      "path": "include/status/status_led.h",
+      "lines": 4,
+      "bytes": 62
+    },
+    {
+      "path": "src/flight/arming.cpp",
+      "lines": 57,
+      "bytes": 1585
+    },
+    {
+      "path": "src/flight/failsafe.cpp",
+      "lines": 4,
+      "bytes": 67
+    },
+    {
+      "path": "src/flight/gcs_commands.cpp",
+      "lines": 405,
+      "bytes": 16601
+    },
+    {
+      "path": "src/flight/home.cpp",
+      "lines": 33,
+      "bytes": 584
+    },
+    {
+      "path": "src/flight/mode_althold.cpp",
+      "lines": 62,
+      "bytes": 1940
+    },
+    {
+      "path": "src/flight/mode_glide.cpp",
+      "lines": 33,
+      "bytes": 953
+    },
+    {
+      "path": "src/flight/mode_manual.cpp",
+      "lines": 27,
+      "bytes": 862
+    },
+    {
+      "path": "src/flight/mode_stabilize.cpp",
+      "lines": 44,
+      "bytes": 1278
+    },
+    {
+      "path": "src/flight/mode_waypoint.cpp",
+      "lines": 84,
+      "bytes": 3171
+    },
+    {
+      "path": "src/flight/motormixer.cpp",
+      "lines": 24,
+      "bytes": 677
+    },
+    {
+      "path": "src/flight/telemetry.cpp",
+      "lines": 12,
+      "bytes": 454
+    },
+    {
+      "path": "src/hal/actuators/pwm_out.cpp",
+      "lines": 88,
+      "bytes": 3096
+    },
+    {
+      "path": "src/hal/comms/lora.cpp",
+      "lines": 161,
+      "bytes": 3177
+    },
+    {
+      "path": "src/hal/comms/rx_spektrum.cpp",
+      "lines": 207,
+      "bytes": 5544
+    },
+    {
+      "path": "src/hal/comms/spi_bus.cpp",
+      "lines": 31,
+      "bytes": 624
+    },
+    {
+      "path": "src/hal/sensors/airspeed.cpp",
+      "lines": 170,
+      "bytes": 4059
+    },
+    {
+      "path": "src/hal/sensors/baro.cpp",
+      "lines": 109,
+      "bytes": 2510
+    },
+    {
+      "path": "src/hal/sensors/bno085.cpp",
+      "lines": 274,
+      "bytes": 10316
+    },
+    {
+      "path": "src/hal/sensors/gps.cpp",
+      "lines": 350,
+      "bytes": 10098
+    },
+    {
+      "path": "src/hal/sensors/imu.cpp",
+      "lines": 792,
+      "bytes": 27050
+    },
+    {
+      "path": "src/hal/sensors/sensor_bus.cpp",
+      "lines": 42,
+      "bytes": 964
+    },
+    {
+      "path": "src/logging/sd_logger.cpp",
+      "lines": 312,
+      "bytes": 11662
+    },
+    {
+      "path": "src/main.cpp",
+      "lines": 577,
+      "bytes": 17731
+    },
+    {
+      "path": "src/math/ahrs.cpp",
+      "lines": 1,
+      "bytes": 32
+    },
+    {
+      "path": "src/math/pid.cpp",
+      "lines": 75,
+      "bytes": 1547
+    },
+    {
+      "path": "src/math/utils.cpp",
+      "lines": 28,
+      "bytes": 563
+    },
+    {
+      "path": "src/nav/waypoint.cpp",
+      "lines": 194,
+      "bytes": 5999
+    },
+    {
+      "path": "src/status/status_led.cpp",
+      "lines": 112,
+      "bytes": 3130
+    },
+    {
+      "path": "test/arduino_lora_receiver/arduino_lora_receiver.ino",
+      "lines": 847,
+      "bytes": 27599
+    },
+    {
+      "path": "test/calibrate_bno085.cpp",
+      "lines": 274,
+      "bytes": 9310
+    },
+    {
+      "path": "test/gcs/gcs_bridge.py",
+      "lines": 409,
+      "bytes": 15569
+    },
+    {
+      "path": "test/gcs/tempCodeRunnerFile.py",
+      "lines": 1,
+      "bytes": 61
+    },
+    {
+      "path": "test/sitl.cpp",
+      "lines": 0,
+      "bytes": 0
+    },
+    {
+      "path": "test/test_bno085.cpp",
+      "lines": 115,
+      "bytes": 3323
+    },
+    {
+      "path": "test/test_bno085_orientation.cpp",
+      "lines": 69,
+      "bytes": 1932
+    },
+    {
+      "path": "test/test_motormixer.cpp",
+      "lines": 0,
+      "bytes": 0
+    },
+    {
+      "path": "test/test_pid.cpp",
+      "lines": 0,
+      "bytes": 0
+    }
+  ],
+  "skipped": [
+    {
+      "path": ".github/workflows/code-improvement-review.yml",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": ".gitignore",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "README.md",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/altitude-hold-flight-analysis.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/flight-controller-wiring-schematic.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/gcs-altitude-telemetry.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/gcs-live-flight-dashboard.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/gcs-pid-tuning.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/mobile-ground-station.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "docs/images/readme/radian-airframe-field-test.jpg",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "platformio.ini",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "test/gcs/gcs_gui.html",
+      "reason": "non-source format; content not audited"
+    },
+    {
+      "path": "test/rc_log_viewer.html",
+      "reason": "over 1000000 bytes"
+    }
+  ],
+  "manifests": [
+    "platformio.ini"
+  ],
+  "conventional_test_paths": [
+    "test/arduino_lora_receiver/arduino_lora_receiver.ino",
+    "test/calibrate_bno085.cpp",
+    "test/gcs/gcs_bridge.py",
+    "test/gcs/gcs_gui.html",
+    "test/gcs/tempCodeRunnerFile.py",
+    "test/rc_log_viewer.html",
+    "test/sitl.cpp",
+    "test/test_bno085.cpp",
+    "test/test_bno085_orientation.cpp",
+    "test/test_motormixer.cpp",
+    "test/test_pid.cpp"
+  ],
+  "findings": [
+    {
+      "rule": "python3-parse",
+      "priority": "P1",
+      "path": "test/gcs/tempCodeRunnerFile.py",
+      "line": 1,
+      "title": "Does not parse with the audit runner Python 3",
+      "recommendation": "Confirm the intended Python version. This may be legacy Python 2 rather than an unintended syntax error; compile with the supported interpreter.",
+      "status": "review-required",
+      "source": "https://github.com/vikasdotvivek/RC-FlightController/blob/37e5d48736f138d9cc85a341d5959c1308f7b6f2/test/gcs/tempCodeRunnerFile.py#L1"
+    },
+    {
+      "rule": "silent-except",
+      "priority": "P2",
+      "path": "test/gcs/gcs_bridge.py",
+      "line": 372,
+      "title": "Exception handler only passes",
+      "recommendation": "Decide whether the error is recoverable; surface nonrecoverable failures instead of silently continuing.",
+      "status": "review-required",
+      "source": "https://github.com/vikasdotvivek/RC-FlightController/blob/37e5d48736f138d9cc85a341d5959c1308f7b6f2/test/gcs/gcs_bridge.py#L372"
+    }
+  ],
+  "total_findings": 2,
+  "findings_omitted": 0,
+  "execution": "No repository code, tests, builds or hardware were executed."
+}
